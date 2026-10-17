@@ -12,21 +12,29 @@ abstain band + not-a-chicken check, served by FastAPI on the frozen contract in
 
 | Split | Balanced accuracy |
 |---|---|
-| Random over windows (naive) | **0.997** |
-| Leave-recording-out (honest) | **0.996** |
-| Always-majority | 0.500 |
+| Random over windows (naive) | 0.997 |
+| **Leave-recording-out (honest)** | **0.996** |
+| Leave-recording-out, RMS-normalised | 0.997 |
 | **Seven trivial loudness/spectrum features** | **0.938** |
 | Duration only | 0.511 |
+| Always-majority | 0.500 |
 
-**Do not put 0.996 on a slide as a result.** It is a confound, and the pig
-project's whole thesis is noticing exactly this.
+**Do not put 0.996 on a slide as an accuracy result.** Something in this dataset
+separates the two folders almost perfectly without any model, and the pig
+project's whole thesis is noticing exactly that.
 
-The giveaway is recording level. Unhealthy files average **−19.7 dBFS**, healthy
-files **−28.9 dBFS** — about 9 dB apart. Loudness alone scores **0.811**
-leave-recording-out, mid-band energy share **0.821**, zero-crossing rate
-**0.819**, and seven such features together **0.938**. The two classes were
-recorded at different gain, distance or equipment, so Perch is largely reading
-the microphone setup rather than the birds.
+Features a first-year student could compute, on the same honest split:
+
+| Feature | Balanced accuracy | Healthy vs unhealthy |
+|---|---|---|
+| Mid-band (2–8 kHz) energy share | 0.821 | 0.19 vs 0.10 |
+| Zero-crossing rate | 0.819 | 0.027 vs 0.012 |
+| Loudness (RMS) | 0.811 | −28.9 vs −19.7 dBFS |
+| Peak amplitude | 0.740 | 0.27 vs 0.51 |
+| All seven together | **0.938** | |
+
+Perch's 1536 dimensions buy about 6 points over that. Whatever is being
+detected, it is a gross, whole-recording property, not a subtle vocal cue.
 
 Two further tells that this is not a real 99.6%:
 
@@ -36,23 +44,48 @@ Two further tells that this is not a real 99.6%:
 * **Every held-out recording scores exactly 0.000 or 1.000.** Real biological
   classifiers do not produce a clean separation like that.
 
-So the honest claim from this data is **"the two folders are trivially
-separable by recording conditions"**, not "we detect sick chickens at 99.6%".
+So the honest claim is **"the two folders are almost perfectly separable by
+gross acoustic properties"**, not "we detect sick chickens at 99.6%".
 
-### What is being done about it
+### Normalising the loudness away does not help
 
 `CHICKEN_NORM=1` re-embeds with every 5 s window scaled to a fixed RMS, which
-removes the loudness giveaway, and trains a separate model:
+removes the loudness giveaway entirely, and trains a separate model:
 
 ```bash
 CHICKEN_NORM=1 python -m ml.chicken_embed     # -> data/emb/chicken_norm.npz
 CHICKEN_NORM=1 python -m ml.chicken_train     # -> models/chicken_norm.joblib
 ```
 
-Whatever that scores is the more defensible number. Gain normalisation does not
-remove a microphone or room difference, so even the normalised score is an upper
-bound on real health detection. **Report the normalised number, state the
-confound, and do not claim this works on a new farm.**
+| | Raw audio | RMS-normalised |
+|---|---|---|
+| Leave-recording-out | 0.996 | **0.997** |
+| Naive | 0.997 | 0.998 |
+| Gap | +0.001 | +0.001 |
+
+**It makes no difference.** So the giveaway is not level, it is spectral shape,
+which survives any gain normalisation: share of energy in the 2–8 kHz band is
+**0.19 for healthy against 0.10 for unhealthy**, and zero-crossing rate is
+**0.027 against 0.012**. Those two features alone score 0.82 each.
+
+That leaves two explanations this dataset cannot separate:
+
+1. **Recording setup.** A different microphone, distance, room or encoder for
+   each folder would produce exactly this.
+2. **Real signal.** Sick birds really do sound different — rales and laboured
+   breathing shift energy and reduce zero crossings, which is the mechanism the
+   source paper claims.
+
+Both predict the same numbers here, and nothing in the dataset breaks the tie:
+there is no metadata saying when or with what each folder was recorded. So the
+honest statement is **"this number is unverifiable from this dataset alone"**,
+and the only thing that would settle it is a second poultry dataset recorded
+elsewhere, or the same flock recorded with one setup across both conditions.
+
+**Report it as a transfer-speed result, not an accuracy result:** the pig
+pipeline moved to a second species in a few hours, and the first thing it did
+was expose a confound that a naive read would have published as a 99.6% disease
+detector.
 
 ## Dataset
 
@@ -159,13 +192,16 @@ detector scoring 0.993 AUC; the probabilities are temperature-calibrated
 (ECE 0.037 → 0.003); the pig pipeline transferred to a second species in hours.
 
 **Cannot:** that it detects illness in a live flock; that 0.996 means anything
-about real birds; that it works on another farm, microphone or gain setting;
+about real birds (RMS normalisation does not move it, so we cannot tell signal
+from recording setup); that it works on another farm, microphone or gain setting;
 that it identifies any specific disease — the dataset says only "unhealthy".
 
 ## Next
 
-1. Report the `CHICKEN_NORM=1` number as the headline and retire the raw one.
-2. Test on a second poultry dataset recorded elsewhere. Cross-dataset is the
-   only real check for a confound this strong.
+1. **Test on a second poultry dataset recorded elsewhere.** This is the only
+   thing that separates "sick birds sound different" from "the two folders were
+   recorded differently". Everything else is a guess.
+2. Ask the dataset authors how each folder was recorded. One sentence from them
+   would settle it.
 3. Cross-species sanity check: does the chicken model fire on pig calls?
    `scripts/get_chicken.sh --all` fetches the SoundWel listing for this.
