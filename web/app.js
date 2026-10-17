@@ -231,7 +231,8 @@ function addAnimal(pen, kind, walkIn) {
   n.g.setAttribute("tabindex", "0");
   n.g.setAttribute("role", "button");
   n.g.setAttribute("aria-label", `A ${name} in Pen ${pen.id}. Click to hear it.`);
-  n.g.addEventListener("click", () => animalSpeaks(pen, a));
+  // React on press, not "click": a click is dropped if the node moves in the DOM between press and release.
+  n.g.addEventListener("pointerdown", (e) => { if (e.button === 0) { e.preventDefault(); animalSpeaks(pen, a); } });
   n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
   pen.animals.push(a);
   for (const b of pen.addBtns) b.disabled = pen.animals.length >= MAX_ANIMALS;
@@ -422,9 +423,13 @@ function animate(now) {
     }
   }
   // keep animals drawn in depth order
+  // Only touch the DOM when the front-to-back order actually changes (re-appending nodes every frame
+  // drops clicks and flickers the hover highlight).
   for (const pen of pens.values()) {
+    const order = [...pen.animals].sort((a, b) => a.y - b.y);
+    if (order.every((a, i) => pen.layer.children[i] === a.g)) continue;
     const focused = document.activeElement;
-    [...pen.animals].sort((a, b) => a.y - b.y).forEach((a) => pen.layer.append(a.g));
+    order.forEach((a) => pen.layer.append(a.g));
     if (focused && pen.layer.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   requestAnimationFrame(animate);
