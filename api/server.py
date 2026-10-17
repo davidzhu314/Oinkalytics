@@ -23,11 +23,13 @@ from ml.embed import SR, embed_waveforms
 from .routes import build_router
 from .schemas import ContextGuess, Explanation, Features, Health, Prediction, SimilarCall, Valence
 from .state import Store, new_id, now
+from .trends import Trends, build_trends_router
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parents[1]
 M = joblib.load(ROOT / "models/oink.joblib")
 store = Store()
+trends = Trends()
 
 # The evidence/explanation workstream provides these; fall back to minimal versions until it lands.
 try:
@@ -188,4 +190,6 @@ app = FastAPI(title="Oinkalytics API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(build_router(store, real_predict,
                                 Health(ok=True, mode="real", model="perch_v2 emb_call + logreg (leave-session-out 0.675)"),
-                                on_alert=upgrade_explanation))
+                                on_alert=upgrade_explanation,
+                                on_prediction=trends.record, on_reset=trends.reset))
+app.include_router(build_trends_router(trends))

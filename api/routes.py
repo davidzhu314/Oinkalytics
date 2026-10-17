@@ -10,7 +10,9 @@ from .state import Store
 
 
 def build_router(store: Store, predict_fn: Callable[..., Prediction], health: Health,
-                 on_alert: Optional[Callable[[Alert, Prediction], None]] = None) -> APIRouter:
+                 on_alert: Optional[Callable[[Alert, Prediction], None]] = None,
+                 on_prediction: Optional[Callable[[Prediction, Optional[Alert]], None]] = None,
+                 on_reset: Optional[Callable[[], None]] = None) -> APIRouter:
     r = APIRouter()
 
     @r.get("/health", response_model=Health)
@@ -30,6 +32,8 @@ def build_router(store: Store, predict_fn: Callable[..., Prediction], health: He
         alert = store.record(pred)
         if alert and on_alert:
             on_alert(alert, pred)
+        if on_prediction:
+            on_prediction(pred, alert)
         return pred
 
     @r.get("/predictions/{prediction_id}", response_model=Prediction)
@@ -69,6 +73,8 @@ def build_router(store: Store, predict_fn: Callable[..., Prediction], health: He
     def reset():
         """Dev only: clear pens, alerts and predictions."""
         store.reset()
+        if on_reset:
+            on_reset()
         return {"ok": True}
 
     return r

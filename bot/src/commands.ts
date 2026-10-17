@@ -1,6 +1,6 @@
 // Farmer commands. Pure apart from the API calls, so tests can drive it with a fake client.
 
-import type { Oink } from "./oink.ts";
+import type { Alert, Oink, PenTrend } from "./oink.ts";
 
 export type Reply =
   | { kind: "text"; text: string }
@@ -11,7 +11,8 @@ export type BotState = { muted: boolean };
 const HELP =
   "I watch the barn microphones and text you when a pen sounds distressed.\n" +
   'Text "status" for every pen, "why" for the reason behind the latest alert, ' +
-  '"play it" to hear the call, or "mute" / "unmute" for alerts.';
+  '"play it" to hear the call, "trends" for which pens have had the most distress lately, ' +
+  'or "mute" / "unmute" for alerts.';
 
 const UNREACHABLE = "I can't reach the barn monitor right now. Try again in a minute.";
 
@@ -20,17 +21,26 @@ export function normalize(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type Command = "status" | "why" | "play" | "mute" | "unmute" | "help";
+type Command = "status" | "why" | "play" | "trends" | "mute" | "unmute" | "help";
 
 export function parse(text: string): Command | undefined {
   const t = normalize(text);
   if (/^(status|pens?|how are (they|the pigs))\b/.test(t)) return "status";
   if (/^(why|explain|reason)\b/.test(t)) return "why";
   if (/^(play|listen|hear)\b/.test(t)) return "play";
+  if (/^(trends?|ranking|worst|which pens?)\b/.test(t)) return "trends";
   if (/^unmute\b/.test(t)) return "unmute";
   if (/^mute\b/.test(t)) return "mute";
   if (/^(help|hi|hello|hey|start|\?)\b/.test(t) || t === "") return "help";
   return undefined;
+}
+
+/** The alert text: the API's message, how this pen compares with its normal (when known), then the replies. */
+export function alertText(a: Alert, trend?: PenTrend): string {
+  const lines = [a.message];
+  if (trend && trend.ratio !== null) lines.push(trend.summary);
+  lines.push('Reply "why" or "play it".');
+  return lines.join("\n");
 }
 
 export async function handle(text: string, oink: Oink, state: BotState): Promise<Reply[]> {
@@ -56,6 +66,8 @@ export async function handle(text: string, oink: Oink, state: BotState): Promise
           { kind: "audio", bytes, name: `pen-${a.pen_id}-call.wav` },
         ];
       }
+      case "trends":
+        return say((await oink.ranking(3)).message);
       case "mute":
         state.muted = true;
         return say('Alerts muted. I\'ll still answer "status" and "why". Text "unmute" to turn them back on.');

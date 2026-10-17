@@ -1,6 +1,6 @@
-// Proactive alerts: poll /alerts and forward new ones to the farmer.
+// Proactive texts: poll /alerts and /trends/events and forward new items to the farmer.
 
-import type { Alert, Oink } from "./oink.ts";
+import type { Alert, Oink, TrendEvent } from "./oink.ts";
 import type { BotState } from "./commands.ts";
 
 export type AlertPoller = { tick(): Promise<void>; start(): Promise<void>; stop(): void };
@@ -11,7 +11,28 @@ export function alertPoller(opts: {
   deliver: (alert: Alert) => Promise<void>;
   intervalMs?: number;
 }): AlertPoller {
-  const { oink, state, deliver, intervalMs = 2000 } = opts;
+  return cursorPoller({ ...opts, name: "alerts", list: (after) => opts.oink.alerts(after), idOf: (a) => a.alert_id });
+}
+
+/** Trend events ("back to normal", "still distressed", "most distress N days in a row"). */
+export function trendPoller(opts: {
+  oink: Oink;
+  state: BotState;
+  deliver: (event: TrendEvent) => Promise<void>;
+  intervalMs?: number;
+}): AlertPoller {
+  return cursorPoller({ ...opts, name: "trends", list: (after) => opts.oink.trendEvents(after), idOf: (e) => e.event_id });
+}
+
+function cursorPoller<T extends { message: string }>(opts: {
+  name: string;
+  list: (after?: string) => Promise<T[]>;
+  idOf: (item: T) => string;
+  state: BotState;
+  deliver: (item: T) => Promise<void>;
+  intervalMs?: number;
+}): AlertPoller {
+  const { name, list, idOf, state, deliver, intervalMs = 2000 } = opts;
   let cursor: string | undefined;
   let ready = false;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -19,10 +40,11 @@ export function alertPoller(opts: {
 
   // Skip every alert that already exists, so a restart doesn't re-send old ones.
   async function init() {
-    const existing = await oink.alerts();
-    cursor = existing.at(-1)?.alert_id;
+    const existing = await list();
+    const last = existing.at(-1);
+    cursor = last ? idOf(last) : undefined;
     ready = true;
-    console.log(`[alerts] starting after ${cursor ?? "(none)"}; ${existing.length} old alert(s) skipped`);
+    console.log(`[${name}] starting after ${cursor ?? "(none)"}; ${existing.length} old item(s) skipped`);
   }
 
   async function tick() {
@@ -30,13 +52,13 @@ export function alertPoller(opts: {
     busy = true;
     try {
       if (!ready) await init();
-      for (const a of await oink.alerts(cursor)) {
-        if (state.muted) console.log(`[alerts] muted, not sending: ${a.message}`);
-        else await deliver(a);
-        cursor = a.alert_id; // advance only after delivery, so a failed send is retried
+      for (const item of await list(cursor)) {
+        if (state.muted) console.log(`[${name}] muted, not sending: ${item.message}`);
+        else await deliver(item);
+        cursor = idOf(item); // advance only after delivery, so a failed send is retried
       }
     } catch (err) {
-      console.error("[alerts] poll failed:", err instanceof Error ? err.message : err);
+      console.error(`[${name}] poll failed:`, err instanceof Error ? err.message : err);
     } finally {
       busy = false;
     }

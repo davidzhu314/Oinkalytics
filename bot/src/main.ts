@@ -2,8 +2,8 @@
 
 import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { handle, type BotState, type Reply } from "./commands.ts";
-import { alertPoller } from "./alerts.ts";
+import { alertText, handle, type BotState, type Reply } from "./commands.ts";
+import { alertPoller, trendPoller } from "./alerts.ts";
 
 const API = process.env.OINK_API ?? "http://localhost:8000";
 const CHANNEL = process.env.BOT_CHANNEL ?? "terminal";
@@ -24,7 +24,7 @@ async function loadProviders() {
   }
   if (CHANNEL === "terminal") {
     const { terminal } = await import("spectrum-ts/providers/terminal");
-    const commands = ["/status", "/why", "/play", "/mute", "/unmute"].map((name) => ({ name }));
+    const commands = ["/status", "/why", "/play", "/trends", "/mute", "/unmute"].map((name) => ({ name }));
     return { terminal, providers: [terminal.config({ commands })] as PlatformProviderConfig[] };
   }
   throw new Error(`Unknown BOT_CHANNEL "${CHANNEL}" (use terminal or imessage)`);
@@ -73,16 +73,32 @@ const poller = alertPoller({
   async deliver(a: Alert) {
     const space = await resolveFarmerSpace();
     if (!space) throw new Error("no farmer conversation yet");
-    await space.send(`${a.message}\nReply "why" or "play it".`);
+    // Trend 1: how this pen compares with its normal. Optional, so an older API still works.
+    const trend = await oink.penTrend(a.pen_id).catch(() => undefined);
+    await space.send(alertText(a, trend));
     console.log(`[alerts] sent ${a.alert_id}: ${a.message}`);
+  },
+});
+
+// Trends 2 and 3: follow-ups after an alert, and pens with the most distress over time.
+const trends = trendPoller({
+  oink,
+  state,
+  async deliver(e) {
+    const space = await resolveFarmerSpace();
+    if (!space) throw new Error("no farmer conversation yet");
+    await space.send(e.message);
+    console.log(`[trends] sent ${e.event_id} (${e.kind}): ${e.message}`);
   },
 });
 
 console.log(`[bot] channel=${CHANNEL} api=${API} muted=${state.muted} farmer=${FARMER ? "set" : "unset"}`);
 await poller.start();
+await trends.start().catch((err) => console.error("[trends] not available:", err));
 
 const shutdown = async () => {
   poller.stop();
+  trends.stop();
   await app.stop();
   process.exit(0);
 };

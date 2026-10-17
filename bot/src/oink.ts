@@ -35,6 +35,30 @@ export type Prediction = {
   audio_url: string;
 };
 
+/** Trend 1: this pen's recent distress share against its normal (GET /trends/pens/{id}). */
+export type PenTrend = {
+  pen_id: string;
+  recent_calls: number;
+  recent_share: number | null;
+  normal_calls: number;
+  normal_share: number | null;
+  normal_source: "pen" | "barn" | null;
+  ratio: number | null;
+  summary: string;
+};
+
+/** Trends 2 and 3: follow-ups after an alert, and pens with the most distress over time. */
+export type TrendEvent = {
+  event_id: string;
+  kind: "settled" | "still_distressed" | "persistent";
+  pen_id: string;
+  created_at: string;
+  alert_id: string | null;
+  message: string;
+};
+
+export type Ranking = { periods: number; period_label: string; flagged: string[]; message: string };
+
 export type Oink = ReturnType<typeof oinkClient>;
 
 export function oinkClient(base: string, fetchImpl: typeof fetch = fetch) {
@@ -64,6 +88,17 @@ export function oinkClient(base: string, fetchImpl: typeof fetch = fetch) {
       const res = await get(audioUrl);
       if (res.status === 404) throw new Error(`audio not found: ${audioUrl}`);
       return Buffer.from(await res.arrayBuffer());
+    },
+    async penTrend(penId: string): Promise<PenTrend | undefined> {
+      const res = await get(`/trends/pens/${encodeURIComponent(penId)}`);
+      return res.status === 404 ? undefined : res.json();
+    },
+    /** Trend events newer than `after`, oldest first; all of them when `after` is omitted. */
+    async trendEvents(after?: string): Promise<TrendEvent[]> {
+      return (await get(`/trends/events${after ? `?after=${encodeURIComponent(after)}` : ""}`)).json();
+    },
+    async ranking(periods = 3): Promise<Ranking> {
+      return (await get(`/trends/ranking?periods=${periods}`)).json();
     },
     async predict(bytes: Buffer, filename: string, penId?: string): Promise<Prediction> {
       const form = new FormData();

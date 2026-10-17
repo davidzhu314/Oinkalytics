@@ -65,6 +65,27 @@ The mock uses the **real** pen and alert logic with a **fake** model. The same f
 
 Each pen keeps its last `ALERT_WINDOW`=5 confident predictions; "unsure" calls are skipped. An alert fires when at least `ALERT_THRESHOLD`=3 of them are distressed and the pen hasn't alerted in the last `ALERT_COOLDOWN_S`=300 seconds. Pen level is **alert** at 3 or more distressed, **watch** at 1 or more, and **calm** otherwise. All three settings are environment variables, so we can set `ALERT_COOLDOWN_S=30` for the demo. Pens come from `PENS` (default `1,2,3,4`).
 
+## Trends (api/trends.py)
+
+Three barn trends from animal sounds. Only confident calls count ("unsure" is skipped), and pens are compared by the **share** of calls that were distressed, not by counts.
+
+| Method | Path | Used by | What it does |
+|---|---|---|---|
+| GET | `/trends/pens` | dashboard | **PenTrend** for every pen |
+| GET | `/trends/pens/{pen_id}` | bot, on each alert | **PenTrend** for one pen (404 if unknown) |
+| GET | `/trends/events?after=<event_id>` | bot | **TrendEvents** newer than `after`. **Poll every 2 s**, like `/alerts` |
+| GET | `/trends/ranking?periods=3` | bot "trends" | **Ranking** of pens by distress share over the last N periods |
+
+1. **Distress vs normal** (`PenTrend`): the share of distressed calls in the last `TREND_RECENT_S` (10 min) against the pen's own share in the `TREND_BASELINE_S` (24 h) before that. Until a pen has `TREND_MIN_CALLS` calls of history, it is compared with the rest of the barn instead (`normal_source: "barn"`). `summary` is ready to append to the alert, e.g. "That's about 3.7× this pen's normal (41% of calls distressed vs 11%)." It also says when a pen is "close to normal", meaning the pen is often this noisy.
+2. **After an alert** (`TrendEvent.kind` `settled` / `still_distressed`): "Pen 3 back to normal, 12 mins after the alert." once `TREND_SETTLE_CALLS` (5) calls since the alert include at most `TREND_SETTLE_MAX` (1) distressed. "Still sounds distressed" fires once if the pen hasn't settled after `TREND_STILL_S` (30 min).
+3. **Most distress over time** (`kind: persistent`): checked per period of `TREND_PERIOD_S` (a day). A pen is "top" for a period when its share is at least `TREND_TOP_RATIO` (1.5×) the other pens' median and `TREND_TOP_MARGIN` (10 points) above it, with `TREND_PERIOD_MIN_CALLS` calls. Being top for `TREND_PERSIST_N` (3) periods in a row sends one message per streak. Neighbours (adjacent pens in `PENS` order) whose share rose in each of the last two periods and sits above the barn median are named as "rising too". The message says "check for signs of illness or other problems", never "infection".
+
+**PenTrend:** `{pen_id, recent_calls, recent_share, normal_calls, normal_share, normal_source: pen|barn|null, ratio, summary}`
+**TrendEvent:** `{event_id, kind: settled|still_distressed|persistent, pen_id, created_at, alert_id, message}`. Send `message` as-is.
+**Ranking:** `{periods, period_label, pens: [{pen_id, calls, share}], flagged, message}`. Send `message` as-is.
+
+**Demo settings** (so "days" run as 20 s periods): `TREND_RECENT_S=15 TREND_BASELINE_S=600 TREND_MIN_CALLS=6 TREND_PERIOD_S=20 TREND_PERIOD_MIN_CALLS=8`. Messages then say "3 20-second periods in a row"; with the default `TREND_PERIOD_S=86400` they say "3 days in a row". Trend state is in memory and clears on `POST /reset`.
+
 ## UI rules
 
 - Label `context_top3` as a "likely situation (random-split accuracy)". Contexts are tied to recording sessions, so we can't claim honest accuracy for them.

@@ -19,11 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routes import build_router
 from .schemas import ContextGuess, Explanation, Features, Health, Prediction, SimilarCall, Valence
 from .state import Store, new_id, now
+from .trends import Trends, build_trends_router
 
 NEG_CONTEXTS = ["Isolation", "Restrain", "Barren", "Castration", "NovelObject"]
 POS_CONTEXTS = ["Reunion", "Run", "Enriched", "PositiveConditioning", "Huddling"]
 
 store = Store()
+trends = Trends()
 
 
 def tone_wav(freq: float, seconds: float = 0.6, sr: int = 16000) -> bytes:
@@ -116,4 +118,6 @@ def mock_predict(data: bytes, filename: str, pen_id=None, hint=None) -> Predicti
 
 app = FastAPI(title="Oinkalytics API (mock)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.include_router(build_router(store, mock_predict, Health(ok=True, mode="mock", model="mock")))
+app.include_router(build_router(store, mock_predict, Health(ok=True, mode="mock", model="mock"),
+                                on_prediction=trends.record, on_reset=trends.reset))
+app.include_router(build_trends_router(trends))

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handle, parse, type BotState } from "../src/commands.ts";
-import { alertPoller } from "../src/alerts.ts";
-import type { Alert, Oink } from "../src/oink.ts";
+import { alertText, handle, parse, type BotState } from "../src/commands.ts";
+import { alertPoller, trendPoller } from "../src/alerts.ts";
+import type { Alert, Oink, PenTrend, TrendEvent } from "../src/oink.ts";
 
 const alert = (id: string, pen = "3"): Alert => ({
   alert_id: id,
@@ -17,7 +17,8 @@ const alert = (id: string, pen = "3"): Alert => ({
   audio_url: "/audio/clip_1",
 });
 
-function fakeOink(alerts: Alert[] = [], opts: { down?: boolean } = {}): Oink {
+function fakeOink(alerts: Alert[] = [], opts: { down?: boolean; events?: TrendEvent[] } = {}): Oink {
+  const events = opts.events ?? [];
   const check = () => {
     if (opts.down) throw new Error("ECONNREFUSED");
   };
@@ -45,8 +46,30 @@ function fakeOink(alerts: Alert[] = [], opts: { down?: boolean } = {}): Oink {
     async predict() {
       throw new Error("not used");
     },
+    async penTrend() {
+      check();
+      return undefined;
+    },
+    async trendEvents(after?: string) {
+      check();
+      const i = after ? events.findIndex((e) => e.event_id === after) : -1;
+      return events.slice(i + 1);
+    },
+    async ranking() {
+      check();
+      return { periods: 3, period_label: "3 days", flagged: ["5"], message: "Distress by pen, last 3 days:\nPen 5: 48% of calls (flagged)\nPen 1: 14% of calls" };
+    },
   };
 }
+
+const event = (id: string, kind: TrendEvent["kind"] = "settled"): TrendEvent => ({
+  event_id: id,
+  kind,
+  pen_id: "3",
+  created_at: "2026-10-17T14:12:00Z",
+  alert_id: "a1",
+  message: `Pen 3 event ${id}`,
+});
 
 test("parse understands the farmer's phrasings", () => {
   assert.equal(parse("Status"), "status");
@@ -128,4 +151,43 @@ test("poller drops alerts while muted and retries after a failed send", async ()
   fail = false;
   await p.tick();
   assert.deepEqual(sent, ["a2"]);
+});
+
+// ---- trends ----
+
+test("parse understands trends phrasings", () => {
+  assert.equal(parse("trends"), "trends");
+  assert.equal(parse("Which pens are worst?"), "trends");
+  assert.equal(parse("worst"), "trends");
+});
+
+test("trends replies with the API's ranking text", async () => {
+  const [r] = await handle("trends", fakeOink(), { muted: false });
+  assert.equal((r as { text: string }).text, "Distress by pen, last 3 days:\nPen 5: 48% of calls (flagged)\nPen 1: 14% of calls");
+});
+
+test("alert text adds the comparison with normal only when it's known", () => {
+  const a = alert("a1");
+  const known: PenTrend = {
+    pen_id: "3", recent_calls: 5, recent_share: 0.8, normal_calls: 40, normal_share: 0.2, normal_source: "pen",
+    ratio: 4, summary: "That's about 4.0× this pen's normal (80% of calls distressed vs 20%).",
+  };
+  assert.equal(
+    alertText(a, known),
+    `${a.message}\nThat's about 4.0× this pen's normal (80% of calls distressed vs 20%).\nReply "why" or "play it".`,
+  );
+  const unknown = { ...known, ratio: null, summary: "Not enough history yet to compare with normal." };
+  assert.equal(alertText(a, unknown), `${a.message}\nReply "why" or "play it".`);
+  assert.equal(alertText(a), `${a.message}\nReply "why" or "play it".`);
+});
+
+test("trend poller skips old events and sends new ones once", async () => {
+  const events = [event("e1")];
+  const sent: string[] = [];
+  const p = trendPoller({ oink: fakeOink([], { events }), state: { muted: false }, deliver: async (e) => void sent.push(e.event_id) });
+  await p.tick();
+  events.push(event("e2", "still_distressed"), event("e3", "persistent"));
+  await p.tick();
+  await p.tick();
+  assert.deepEqual(sent, ["e2", "e3"]);
 });
