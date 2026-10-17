@@ -7,7 +7,8 @@ so /hub-api/clip/{name} can't be used to read arbitrary files.
 Chickens: pens can hold pigs, chickens or both (PEN_LAYOUT). The page reaches the chicken
 workstream's API (CHICKEN_API, same contract) through /hub-api/chicken/*, so the browser never
 needs cross-origin access to a teammate's server or tunnel. Chicken demo clips come from
-data/chicken_demo_clips.csv (path,truth), also allow-listed.
+data/chicken_demo_clips.csv (written by ml/chicken_train.py: id,p_sick,truth,status; each id is
+looked up in data/chicken_labels.csv), also allow-listed.
 """
 
 import csv
@@ -64,9 +65,16 @@ def _chicken_clips(allowed: dict[str, Path]) -> dict[str, list[dict]]:
     pool: dict[str, list[dict]] = {"calm": [], "distressed": []}
     if not CHICKEN_CLIPS.exists():
         return pool
+    ids = {}
+    labels = ROOT / "data/chicken_labels.csv"
+    if labels.exists():
+        with open(labels, newline="") as f:
+            ids = {r["id"]: r["path"] for r in csv.DictReader(f)}
     with open(CHICKEN_CLIPS, newline="") as f:
         for i, row in enumerate(csv.DictReader(f)):
-            p = Path(row.get("path") or row.get("file") or "")
+            p = Path(row.get("path") or row.get("file") or ids.get(row.get("id", ""), ""))
+            if not p.name:
+                continue
             path = p if p.is_absolute() else ROOT / p
             kind = TRUTH.get((row.get("truth") or "").strip().lower())
             if kind and path.exists():

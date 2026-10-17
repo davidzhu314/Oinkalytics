@@ -9,9 +9,9 @@ Pigs: the ML session's list, data/demo_clips.csv (override with DEMO_CLIPS): col
 context, p_distressed, status, truth. Only DEMO_TEAMS sessions are used (default ETHZ,NMBU: FBN calm
 clips mostly read as distressed, see docs/SESSION_HANDOFF.md).
 
-Chickens: data/chicken_demo_clips.csv (override with CHICKEN_CLIPS), written by the chicken
-workstream: columns path (relative to the repo root) and truth (healthy|unhealthy). Clips must come
-from recordings the chicken model never trained on.
+Chickens: data/chicken_demo_clips.csv (override with CHICKEN_CLIPS), written by ml/chicken_train.py
+from recordings held out of everything: columns id, p_sick, truth (healthy|sick), status. Each id is
+looked up in data/chicken_labels.csv for its file. A `path` column works too.
 
 Pools are split by the **true** label, not the model's verdict, so the demo shows the model as it is.
 """
@@ -46,13 +46,26 @@ SOURCES = {
 }
 
 
+def _chicken_paths() -> dict[str, str]:
+    """Recording id -> file, from ml/chicken_labels.py's table."""
+    labels = REPO / "data" / "chicken_labels.csv"
+    if not labels.exists():
+        return {}
+    with open(labels, newline="") as f:
+        return {r["id"]: r["path"] for r in csv.DictReader(f)}
+
+
 def load_clips(path: Path, audio_dir: Path, teams: list[str]) -> dict[str, list[dict]]:
     pools: dict[str, list[dict]] = {"calm": [], "distressed": []}
     if not path.exists():
         return pools
+    ids = None
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             name = row.get("file") or row.get("path") or ""
+            if not name and row.get("id"):
+                ids = _chicken_paths() if ids is None else ids
+                name = ids.get(row["id"], "")
             p = Path(name)
             row["path"] = str(p if p.is_absolute() else audio_dir / p)
             team = (row.get("session") or "").split("_")[0]

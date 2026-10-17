@@ -98,29 +98,34 @@ def claims(pred: dict | None) -> bool:
 def route(path: str, pen_id: str | None = None, mock_truth: tuple[str, str] | None = None) -> dict:
     """Both models listen to one call; the one that recognises its own animal gets the verdict.
 
-    Asks every reachable species API (without a pen, so nothing is counted yet). If exactly one
-    claims the call, it is posted again to that API with `pen_id`, so it counts in that pen.
-    Both or neither claiming = "not sure which animal", counted nowhere.
+    The call goes to every reachable species API once, with `pen_id`. Each server's pen window
+    already skips calls it answers "not my animal" (unsure is never counted), so a call only
+    counts for the model that claims it. One request per model, and with a pen the servers use
+    template explanations, so the barn stream makes no LLM calls. Without `pen_id` (check a
+    call) nothing is counted and the servers write their full explanations.
+    Both or neither claiming = "not sure which animal". In tests each model rejected the other
+    species almost every time (pig calls -> chicken model 20/20 rejected; chicken recordings ->
+    pig model 11/12 rejected, the 12th "not sure", which no pen counts).
     `mock_truth` = (species, calm|distressed) lets mock servers fake the right answers; real
     servers ignore it.
     Returns {"winner": species | None, "preds": {species: pred | None}, "counted": pred | None}.
     """
-    preds: dict[str, dict | None] = {}
-    for sp, meta in SPECIES.items():
-        mock = None
-        if mock_truth:
-            mock = mock_truth[1] if mock_truth[0] == sp else None
+    from concurrent.futures import ThreadPoolExecutor
+
+    def ask(sp: str) -> dict | None:
+        mock = mock_truth[1] if mock_truth and mock_truth[0] == sp else None
+        name = path if not mock_truth or mock_truth[0] == sp else "noise.wav"  # mock: not my animal
         try:
-            name = path if not mock_truth or mock_truth[0] == sp else "noise.wav"  # mock: not my animal
-            preds[sp] = _predict_named(path, name, mock_label=mock, base=meta["api"])
+            return _predict_named(path, name, pen_id=pen_id, mock_label=mock, base=SPECIES[sp]["api"])
         except Exception:
-            preds[sp] = None
+            return None
+
+    with ThreadPoolExecutor(len(SPECIES)) as pool:
+        preds = dict(zip(SPECIES, pool.map(ask, SPECIES)))
     claimed = [sp for sp, p in preds.items() if claims(p)]
-    winner = claimed[0] if len(claimed) == 1 else None
-    counted = None
-    if winner and pen_id:
-        m = mock_truth[1] if mock_truth else None
-        counted = _predict_named(path, path, pen_id=pen_id, mock_label=m, base=SPECIES[winner]["api"])
+    sure = [sp for sp in claimed if preds[sp]["status"] != "unsure"]  # a "not sure" claim is never counted
+    winner = claimed[0] if len(claimed) == 1 else sure[0] if len(sure) == 1 else None
+    counted = preds[winner] if winner and pen_id else None
     return {"winner": winner, "preds": preds, "counted": counted}
 
 

@@ -291,17 +291,17 @@ function nextClip(pen) {
   return { name: c.name, url: c.url, species: sp };
 }
 
-/** Both models listen; returns [species, prediction counted in the pen] or [null, null] if no single model claims it. */
+/** Both models listen: the call goes to each once, with the pen. Each server's pen window skips calls
+ *  it answers "not my animal" (and "not sure"), so a call only counts for the model that claims it, and
+ *  with a pen the servers use template explanations (no LLM call per barn call).
+ *  Returns [species, its prediction], or [null, null] if no single model claims it. */
 async function judge(blob, name, penId) {
   const listeners = Object.keys(SPECIES).filter((sp) => online[sp]);
-  if (listeners.length === 1) {
-    const p = await predictAt(listeners[0], blob, name, penId); // a model's own "not my animal" is skipped by its pen window
-    return p.abstain_reason === "not_pig" ? [null, p] : [listeners[0], p];
-  }
-  const heard = await Promise.all(listeners.map((sp) => predictAt(sp, blob, name, null).catch(() => null)));
+  const heard = await Promise.all(listeners.map((sp) => predictAt(sp, blob, name, penId).catch(() => null)));
   const claimed = listeners.filter((sp, i) => heard[i] && heard[i].abstain_reason !== "not_pig");
-  if (claimed.length !== 1) return [null, null];
-  return [claimed[0], await predictAt(claimed[0], blob, name, penId)];
+  const sure = claimed.filter((sp) => heard[listeners.indexOf(sp)].status !== "unsure");
+  const winner = claimed.length === 1 ? claimed[0] : sure.length === 1 ? sure[0] : null;
+  return winner ? [winner, heard[listeners.indexOf(winner)]] : [null, null];
 }
 
 async function feedPen(pen, aloud) {
