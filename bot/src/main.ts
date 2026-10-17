@@ -102,5 +102,6 @@ for await (const [space, message] of app.messages) {
   // Remember the farmer's conversation for alerts (any sender in terminal mode).
   if (terminal || !FARMER || sender === FARMER) farmerSpace = space;
   const text = message.content.text.replace(/^\//, "");
+  console.log(`[bot] received "${text.slice(0, 40)}"`);
   await space.responding(async () => send(space, await handle(text, oink, state)));
 }
