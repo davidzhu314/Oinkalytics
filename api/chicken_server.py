@@ -1,10 +1,13 @@
 """Chicken health API: the same contract and routes as the pig server, different model.
 
-Run:  uvicorn api.chicken_server:app --port 8001
+Run:  uvicorn api.chicken_server:app --port 8002
 Needs models/chicken.joblib (python -m ml.chicken_train).
 
-The dashboard and the Photon bot need no changes at all - point OINK_API at this
-port and every endpoint behaves the same. Two places where the shared contract in
+Port 8002 is what dashboard/client.py already defaults CHICKEN_API to, so the
+dashboard, hub and bot pick this up with nothing to configure. They label a
+prediction as chicken by which API answered, so no species field is needed.
+
+Two places where the shared contract in
 api/schemas.py is stretched rather than changed, because that file is frozen:
 
   * `status` reuses the pig words. "calm" means a healthy-sounding recording and
@@ -16,6 +19,9 @@ api/schemas.py is stretched rather than changed, because that file is frozen:
 
 `context_top3` is always empty: this dataset has no recording-context labels, and
 inventing them would be the dishonest kind of shortcut this project exists to avoid.
+
+Alert text and pen summaries are reworded for chickens in ChickenStore below, so
+the bot can keep sending `message` and `summary` verbatim.
 """
 
 import io
@@ -37,7 +43,7 @@ from ml.embed import SR, WIN, embed_waveforms
 from ml.evidence import measure
 
 from .routes import build_router
-from .schemas import Explanation, Features, Health, Prediction, SimilarCall, Valence
+from .schemas import Alert, Explanation, Features, Health, PenStatus, Prediction, SimilarCall, Valence
 from .state import Store, new_id, now
 
 load_dotenv()
@@ -46,7 +52,34 @@ MODEL = ROOT / "models/chicken.joblib"
 if not MODEL.exists():
     raise SystemExit(f"{MODEL} missing; run python -m ml.chicken_train first")
 M = joblib.load(MODEL)
-store = Store()
+
+
+class ChickenStore(Store):
+    """Store with chicken wording, so the bot can still send `message` and `summary` as-is.
+
+    The pen and alert logic in api/state.py is shared and frozen, so only the two
+    human-readable strings are rewritten here. "Pen" is kept, not "Coop", because
+    pens are now mixed: pens 2 and 4 hold both pigs and chickens, and the bot
+    already prefixes the species.
+    """
+
+    def record(self, pred: Prediction) -> Alert | None:
+        alert = super().record(pred)
+        if alert is not None:
+            alert.message = (
+                f"Pen {alert.pen_id}: sick-sounding calls rising, {alert.distressed} of the last "
+                f"{alert.window} flagged ({alert.confidence:.0%} confidence)."
+            )
+        return alert
+
+    def pen_status(self, pen_id: str) -> PenStatus:
+        s = super().pen_status(pen_id)
+        if s.window:
+            s.summary = f"Pen {pen_id}: {s.level.upper()}, {s.distressed} of last {s.window} sounded sick"
+        return s
+
+
+store = ChickenStore()
 
 EVIDENCE: dict[str, dict] = {}   # prediction_id -> evidence, so an alert can be upgraded later
 

@@ -17,8 +17,10 @@ What differs from the pig version, and why:
   * There is no bird, pen or session metadata in this dataset, so
     leave-recording-out is the strictest split available. It does NOT show that
     the model generalises to a new farm, and we say so.
-  * `noise` (86 recordings) is the dataset's own not-a-chicken class, better
-    matched to this audio than ESC-50.
+  * The not-a-chicken detector trains on three kinds of negative: the dataset's
+    own `noise`, ESC-50 minus its poultry classes, and SoundWel pig calls. The
+    barn sends every call to both the pig and the chicken model, so rejecting a
+    pig squeal is part of the job; in-dataset noise alone never tests that.
   * A duration-only baseline is reported, because the two classes have very
     different clip lengths here and a model that only measures length would look
     good for the wrong reason.
@@ -49,10 +51,15 @@ EMB = ROOT / ("data/emb/chicken_norm.npz" if NORM else "data/emb/chicken.npz")
 MODEL_OUT = ROOT / ("models/chicken_norm.joblib" if NORM else "models/chicken.joblib")
 DEMO_OUT = ROOT / ("data/chicken_demo_clips_norm.csv" if NORM else "data/chicken_demo_clips.csv")
 
+# Extra not-a-chicken negatives (ESC-50 minus poultry, plus SoundWel pig calls).
+# Optional: the trainer says so and carries on without them.
+NEG_CSV = ROOT / "data/chicken_negatives.csv"
+NEG_EMB = ROOT / "data/emb/chicken_neg.npz"
+
 N_DEMO_PER_CLASS = 6     # whole recordings held out of everything, for demo clips
 MAX_FALSE_ALARM = 0.20   # share of healthy windows we allow to be called sick
 HEALTHY_BELOW = 0.40     # p_sick below this is "healthy"; between it and the alarm point is "unsure"
-SEED = 0
+SEED = 0       # only the naive KFold uses it; the demo hold-out is picked by duration
 FOLDS = 5
 
 
@@ -102,6 +109,26 @@ def load():
     if w.label.isna().any():
         sys.exit("embeddings contain ids missing from the label table; rebuild both")
     return w, z
+
+
+def load_negatives():
+    """ESC-50 + SoundWel embeddings and their metadata, or (None, None) if not built yet.
+
+    Built with the pig embedder unchanged, since these clips are all one window:
+        python -m ml.chicken_negatives
+        python -m ml.embed data/chicken_negatives.csv data/emb/chicken_neg.npz
+    """
+    if not (NEG_EMB.exists() and NEG_CSV.exists()):
+        return None, None
+    z = np.load(NEG_EMB, allow_pickle=True)
+    meta = pd.read_csv(NEG_CSV).set_index("id")
+    ids = pd.Index(z["ids"])
+    missing = ids.difference(meta.index)
+    if len(missing):
+        print(f"  {len(missing)} negative embeddings have no metadata row; ignoring them")
+        keep = ids.isin(meta.index)
+        return z["emb"][keep], meta.loc[ids[keep]].reset_index()
+    return z["emb"], meta.loc[ids].reset_index()
 
 
 def typical_values(call: pd.DataFrame, per_class: int = 40) -> dict:
@@ -157,17 +184,27 @@ def main():
     gc = call.id.to_numpy()
 
     # Demo hold-out: whole recordings, so no window of them is ever trained on.
-    rng = np.random.RandomState(SEED)
+    #
+    # Chosen by duration alone, shortest first, and deliberately BEFORE any model
+    # exists: picking hold-out clips after seeing predictions would be choosing the
+    # examples that flatter the model. Short clips are wanted because these are the
+    # ones played in the demo, and the dataset runs to five minutes a file.
     demo_ids = []
     for cls in (0, 1):
-        pool = np.unique(call.id[call.sick == cls])
-        demo_ids += list(rng.choice(pool, size=min(N_DEMO_PER_CLASS, max(0, len(pool) - FOLDS)), replace=False))
+        pool = (call[call.sick == cls]
+                .drop_duplicates("id")
+                .sort_values(["duration_s", "id"]))          # id breaks ties reproducibly
+        keep = max(0, pool.id.nunique() - FOLDS)             # always leave enough to fold on
+        demo_ids += list(pool.id.head(min(N_DEMO_PER_CLASS, keep)))
     demo = np.isin(gc, demo_ids)
     tr = ~demo
     Xtr, ytr, gtr = Xc[tr], yc[tr], gc[tr]
     n_groups = len(np.unique(gtr))
+    held = call[call.id.isin(demo_ids)].drop_duplicates("id")[["id", "label", "duration_s"]]
     print(f"\ntrain {tr.sum()} windows / {n_groups} recordings; "
-          f"demo hold-out {demo.sum()} windows / {len(demo_ids)} recordings")
+          f"demo hold-out {demo.sum()} windows / {len(demo_ids)} recordings, "
+          f"{held.duration_s.min():.1f}-{held.duration_s.max():.1f} s (chosen by length)")
+    print(held.sort_values("duration_s").to_string(index=False))
     if n_groups < FOLDS * 2:
         print(f"  WARNING only {n_groups} training recordings; these numbers will be noisy")
     folds = max(2, min(FOLDS, n_groups))
@@ -218,23 +255,58 @@ def main():
     clf = model().fit(Xtr, ytr)
 
     # ------------------------------------------------ not-a-chicken detector ----
+    # Negatives come from three places, because the barn sends every call to both
+    # the pig model and this one: the dataset's own `noise`, ESC-50 minus the
+    # poultry classes, and SoundWel pig calls. A detector trained only on
+    # in-dataset noise has never been asked about a pig.
     detector = None
+    neg_X, neg_tr, neg_te, neg_names = [], [], [], {}
     if noise.sum() > 0:
         nz = w[noise].reset_index(drop=True)
-        Xn, gn = X_all[noise], nz.id.to_numpy()
-        hold = set(np.unique(gn)[::4])          # every 4th noise recording held out
-        n_tr, n_te = ~np.isin(gn, list(hold)), np.isin(gn, list(hold))
-        if n_tr.sum() > 0:
-            Xd = np.vstack([Xtr, Xn[n_tr]])
-            yd = np.concatenate([np.ones(len(Xtr)), np.zeros(n_tr.sum())])
-            detector = model(C=0.01).fit(Xd, yd)
-            te_X = np.vstack([Xc[demo], Xn[n_te]]) if demo.any() or n_te.any() else None
-            te_y = np.concatenate([np.ones(demo.sum()), np.zeros(n_te.sum())])
-            if te_X is not None and len(np.unique(te_y)) > 1:
-                pp = detector.predict_proba(te_X)[:, 1]
-                print(f"\nnot-a-chicken detector on unseen recordings: AUC {roc_auc_score(te_y, pp):.3f}; "
-                      f"demo chicken windows kept {(pp[:demo.sum()] >= 0.5).mean():.0%}; "
-                      f"held-out noise rejected {(pp[demo.sum():] < 0.5).mean():.0%}")
+        gn = nz.id.to_numpy()
+        hold = set(np.unique(gn)[::4])            # every 4th noise recording held out
+        neg_X.append(X_all[noise])
+        neg_tr.append(~np.isin(gn, list(hold)))
+        neg_te.append(np.isin(gn, list(hold)))
+        neg_names["dataset noise"] = len(neg_X) - 1
+
+    ext, ext_meta = load_negatives()
+    if ext is not None:
+        for source in sorted(ext_meta.source.unique()):
+            m = (ext_meta.source == source).to_numpy()
+            neg_X.append(ext[m])
+            neg_tr.append(~ext_meta.held_out.to_numpy()[m].astype(bool))
+            neg_te.append(ext_meta.held_out.to_numpy()[m].astype(bool))
+            neg_names[source] = len(neg_X) - 1
+
+    if neg_X:
+        Xd = np.vstack([Xtr] + [X[t] for X, t in zip(neg_X, neg_tr)])
+        yd = np.concatenate([np.ones(len(Xtr))] + [np.zeros(t.sum()) for t in neg_tr])
+        detector = model(C=0.01).fit(Xd, yd)
+
+        print("\nnot-a-chicken detector, trained on "
+              f"{int((yd == 0).sum())} negatives from {len(neg_names)} source(s):")
+        p_chick = detector.predict_proba(Xc[demo])[:, 1] if demo.any() else np.array([])
+        if demo.any():
+            print(f"  held-out chicken windows kept   : {(p_chick >= 0.5).mean():.0%} "
+                  f"({demo.sum()} windows)")
+        all_te_p, all_te_y = ([p_chick], [np.ones(demo.sum())]) if demo.any() else ([], [])
+        for name, i in neg_names.items():
+            te = neg_te[i]
+            if te.sum() == 0:
+                print(f"  {name:30}: nothing held out")
+                continue
+            pp = detector.predict_proba(neg_X[i][te])[:, 1]
+            print(f"  {name:30}: rejected {(pp < 0.5).mean():.0%} of {te.sum()} held-out clips")
+            all_te_p.append(pp)
+            all_te_y.append(np.zeros(te.sum()))
+        if len(all_te_p) > 1:
+            ty, tp = np.concatenate(all_te_y), np.concatenate(all_te_p)
+            if len(np.unique(ty)) > 1:
+                print(f"  overall AUC on unseen clips   : {roc_auc_score(ty, tp):.3f}")
+        if "soundwel" not in neg_names:
+            print("  NOTE no pig calls in the negatives: run python -m ml.chicken_negatives "
+                  "after scripts/get_chicken.sh --all, then re-run this.")
 
     # ------------------------------------------ neighbours and OOD distance ----
     U = unit(Xtr).astype(np.float32)

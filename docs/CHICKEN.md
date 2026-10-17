@@ -23,7 +23,8 @@ abstain band + not-a-chicken check, served by FastAPI on the frozen contract in
 separates the two folders almost perfectly without any model, and the pig
 project's whole thesis is noticing exactly that.
 
-Features a first-year student could compute, on the same honest split:
+Features a first-year student could compute, on the same honest split
+(`python -m ml.chicken_baseline` reproduces this table in ~2 min, no Perch needed):
 
 | Feature | Balanced accuracy | Healthy vs unhealthy |
 |---|---|---|
@@ -125,10 +126,19 @@ id is the honest split; random over windows is the naive one.
 **`emb`, not `emb_call`.** Windows are full 5 s, so `emb_call` would average the
 same frames.
 
-**`noise` is the not-a-chicken set.** The dataset ships 86 noise recordings,
-better matched to this audio than ESC-50. Detector AUC on unseen recordings is
-**0.993**, keeping 99% of held-out chicken windows and rejecting 97% of noise.
-ESC-50 remains available via `scripts/get_chicken.sh --all` as an extra check.
+**Not-a-chicken negatives.** The shipped model trains its detector on the
+dataset's own 86 `noise` recordings: AUC **0.993** on unseen recordings, keeping
+99% of held-out chicken windows and rejecting 97% of noise. Because the barn
+sends every call to both the pig and the chicken model, `ml/chicken_negatives.py`
+can add ESC-50 (minus `hen` and `rooster`) and SoundWel pig calls as extra
+negatives, and the trainer then reports a rejection rate per source. It is opt-in:
+build the two files above and re-run the trainer.
+
+**Demo hold-out is chosen by length, shortest first, before any model exists.**
+Twelve recordings (6 per class) are held out of everything. Picking them after
+seeing predictions would be choosing the examples that flatter the model, and the
+barn plays one call at a time, so a 5-minute file stalls a pen. Current hold-out
+runs 0.46 s to 8.3 s.
 
 **Reused unchanged:** `ml/embed.py` (Perch), `ml/evidence.py` (`measure()`),
 `api/routes.py`, `api/state.py`, `api/schemas.py`.
@@ -139,7 +149,17 @@ fields are `p_distressed`/calm/distressed, and its stray-claim check looks for
 SoundWel recording contexts this dataset has not got. The chicken version reuses
 its number checker and adds two stricter bans — **no disease may be named**
 (the label is "unhealthy", not a diagnosis) and **no advice** may be given.
-24/24 guardrail tests pass in `ml/chicken_explain_test.py`.
+28/28 guardrail tests pass in `ml/chicken_explain_test.py`.
+
+**Explanations never cite clip length.** `ml/explain.py` compares a pig call's
+duration to a typical call, which is real evidence. Here duration is the length
+of whatever file someone saved, means nothing to a farmer, and is part of the
+confound - so `duration_s` is removed from the comparable features and "lasted",
+"seconds" and friends are in the banned list. Loudness and spectral centroid are
+excluded for the same reason, more strongly: they *are* the confound. Pitch is
+the only comparison left and the informativeness filter usually drops it too,
+which means most explanations are just the verdict and its confidence. That is
+the honest outcome: there is no uncontaminated measured evidence to point at.
 
 ## Running it
 
@@ -148,17 +168,23 @@ bash scripts/get_chicken.sh        # ~1.1 GB; parallel, idempotent, resumable
 python -m ml.chicken_labels        # -> data/chicken_labels.csv
 python -m ml.chicken_embed         # -> data/emb/chicken.npz   (~12 min CPU)
 python -m ml.chicken_train         # -> models/chicken.joblib
-python -m ml.chicken_explain_test  # 24 guardrail tests
+python -m ml.chicken_baseline      # the 0.938 confound table, no Perch needed
+python -m ml.chicken_explain_test  # 28 guardrail tests
 
-uvicorn api.chicken_server:app --port 8001
+# optional: add pigs + ESC-50 as not-a-chicken negatives (David's Mac has both)
+python -m ml.chicken_negatives
+python -m ml.embed data/chicken_negatives.csv data/emb/chicken_neg.npz
+python -m ml.chicken_train          # now reports rejection per negative source
+
+uvicorn api.chicken_server:app --port 8002
 ```
 
 The dashboard and the Photon bot need **no code changes** — point `OINK_API` at
 port 8001:
 
 ```bash
-OINK_API=http://localhost:8001 python dashboard/app.py
-OINK_API=http://localhost:8001 npm run dev --prefix bot
+# CHICKEN_API already defaults to localhost:8002, so usually nothing to set
+CHICKEN_API=http://localhost:8002 python dashboard/app.py
 ```
 
 > Mendeley throttles one connection to ~50 KB/s, which would make the download
@@ -175,6 +201,21 @@ OINK_API=http://localhost:8001 npm run dev --prefix bot
 | `status: "distressed"` | distressed call | unhealthy-sounding recording |
 | `abstain_reason: "not_pig"` | not a pig | not a chicken |
 | `valence.p_distressed` | P(negative valence) | P(sounds unhealthy) |
+
+No `species` or `status_label` field is added: the dashboard, hub and bot label a
+prediction by which API answered it, so `api/schemas.py` stays untouched.
+
+Alert text and pen summaries are reworded for chickens inside
+`api/chicken_server.py` (a `Store` subclass; `api/state.py` is shared and
+untouched), so the bot keeps sending them verbatim:
+
+```
+Pen 3: sick-sounding calls rising, 3 of the last 5 flagged (82% confidence).
+Pen 3: ALERT, 3 of last 5 sounded sick
+```
+
+"Pen", not "Coop", because pens are mixed now - 2 and 4 hold both species - and
+the bot already prefixes the species.
 
 The farmer never sees these names: the text they read is `explanation.text`,
 which says "I'm not sure this is a chicken recording". The dashboard's

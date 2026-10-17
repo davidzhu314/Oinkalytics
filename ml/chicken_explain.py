@@ -35,7 +35,22 @@ load_dotenv()
 TIMEOUT_S = float(os.environ.get("EXPLAIN_TIMEOUT_S", "8"))
 # Only cite a typical comparison when the two classes actually differ by this much.
 INFORMATIVE = 0.15
-COMPARABLE = {"duration_s": ("lasted", "s"), "f0_mean_hz": ("had a mean pitch of", "Hz")}
+
+# Deliberately NOT including duration_s, unlike ml/explain.py.
+#
+# For a pig, duration is the length of one call and genuinely distinguishes calm
+# from distressed. For a chicken here it is the length of the audio file somebody
+# happened to save, which tells a farmer nothing, and clip length is part of the
+# confound documented in docs/CHICKEN.md. Citing it would dress up an artefact as
+# evidence.
+#
+# Loudness and spectral centroid are left out for the same reason, and more
+# strongly: they are the confound (healthy files are ~9 dB quieter, and mid-band
+# energy alone separates the classes at 0.82). So pitch is the only comparison
+# left, and the INFORMATIVE filter usually drops that too, which means most
+# explanations are just the verdict and its confidence. That is the honest
+# outcome: this model has no uncontaminated measured evidence to point at.
+COMPARABLE = {"f0_mean_hz": ("had a mean pitch of", "Hz")}
 
 # Feelings, diagnoses and advice are all out of bounds: none of them are in the evidence.
 BANNED = re.compile(
@@ -43,7 +58,10 @@ BANNED = re.compile(
     r"feel\w*|want\w*|suffer\w*|happy|sad|scared|afraid|distress\w*|pain\w*|miserab\w*|"
     r"newcastle|avian\s+influenza|bird\s+flu|coccidiosis|bronchitis|mycoplasm\w*|"
     r"salmonell\w*|coryza|gumboro|marek\w*|infect\w*|diagnos\w*|disease|virus|bacteri\w*|"
-    r"treat\w*|medicat\w*|antibiotic\w*|vaccin\w*|cull\w*|vet\b|veterinar\w*|should|must"
+    r"treat\w*|medicat\w*|antibiotic\w*|vaccin\w*|cull\w*|vet\b|veterinar\w*|should|must|"
+    # Clip length is the size of the saved file, not a property of the birds, and
+    # it is part of the confound. The LLM must not reach for it as evidence.
+    r"lasted|lasting|seconds?|minutes?|durations?|lengths?"
     r")\b",
     re.I,
 )
@@ -55,6 +73,9 @@ Rules:
 - Exactly 2 short sentences. No lists, no headings, no quotes.
 - Sentence 1: the verdict and its confidence (use "confidence" as a percentage).
 - Sentence 2: the evidence, i.e. the measured values that have a typical value to compare with.
+  If "measured" or "typical" is empty, say instead that the verdict comes from how the recording
+  compares with the training recordings overall, and cite no numbers beyond the confidence.
+- Never mention how long the recording is. That is the length of the file, not a property of the birds.
 - Describe sounds, not diagnoses. Say "sounds like recordings labelled unhealthy", never name a
   disease, never say "infected", "sick bird", "diagnose", and never recommend any action.
 - Describe sounds, not feelings. Never say the birds feel, want or suffer anything.

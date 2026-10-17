@@ -41,6 +41,7 @@ def check_cases():
 
     e = prepare(SICK)
     case("sick template says unhealthy", "unhealthy" in template(e))
+    case("template never mentions duration", "s (" not in template(e) and "lasted" not in template(e))
     case("healthy template says healthy", "healthy" in template(prepare(HEALTHY)))
     case("not_chicken template is the fixed line",
          template(prepare(NOT_CHICKEN)) == "I'm not sure this is a chicken recording.")
@@ -64,16 +65,21 @@ def check_cases():
 
     # --- numbers that ARE in the evidence must pass --------------------------
     case("evidence numbers accepted",
-         check("This recording sounds unhealthy (86% confident). It lasted 4.92 s "
-               "(typical unhealthy recording: 4.8 s).", e) is None)
+         check("This recording sounds unhealthy (86% confident). It had a mean pitch of 612 Hz "
+               "(typical unhealthy recording: 640 Hz).", e) is None)
+    # Clip length is the file size, not a bird property, and is part of the confound.
+    case("duration comparison rejected",
+         check("This recording sounds unhealthy (86% confident). It lasted 4.92 s.", e) is not None)
+    case("duration is not offered as a comparison", "duration_s" not in prepare(SICK)["typical"])
+    case("duration is not measured into the evidence", "duration_s" not in prepare(SICK)["measured"])
     case("rounded percentage accepted",
          check("This recording sounds unhealthy (86% confident).", e) is None)
 
     # --- prepare() only keeps informative comparisons ------------------------
-    flat = {**SICK, "typical": {"healthy": {"duration_s": 4.80, "f0_mean_hz": 640.0},
-                                "sick": {"duration_s": 4.81, "f0_mean_hz": 641.0}}}
+    flat = {**SICK, "typical": {"healthy": {"f0_mean_hz": 640.0},
+                                "sick": {"f0_mean_hz": 641.0}}}
     case("uninformative typicals dropped", prepare(flat)["typical"] == {})
-    case("informative typicals kept", set(prepare(SICK)["typical"]) == {"duration_s", "f0_mean_hz"})
+    case("informative typicals kept", set(prepare(SICK)["typical"]) == {"f0_mean_hz"})
     case("confidence flips for healthy", prepare(HEALTHY)["confidence"] == 0.89)
     case("confidence for sick", prepare(SICK)["confidence"] == 0.86)
 
