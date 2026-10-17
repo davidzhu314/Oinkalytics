@@ -20,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import client  # noqa: E402
-from simulator import REPO, Simulator  # noqa: E402
+from simulator import REPO, BarnSimulator  # noqa: E402
 
 STATUS = {
     "calm": ("CALM", "var(--oink-calm)"),
@@ -54,112 +54,119 @@ CSS = """
 .oink-down { padding: 16px; border-radius: 12px; background: #fde8e8; color: #9b1c1c; font-size: 1.2rem; }
 """
 
-SIMS = {sp: Simulator(sp) for sp in client.SPECIES}
+sim = BarnSimulator()
+RANK = {"calm": 0, "watch": 1, "alert": 2}
 
 
-# ---------- barn / coop view (one per species, same API contract) ----------
+# ---------- the barn: every pen, whichever animals live in it ----------
 
-def pens_html(species: str) -> str:
-    meta = client.SPECIES[species]
-    try:
-        pens = client.pens(meta["api"])
-    except Exception:
-        if species == "pig":
-            return f'<div class="oink-down">Can\'t reach the barn monitor at {html.escape(meta["api"])}. Is the API running?</div>'
-        return (f'<div class="oink-note oink-wait">The {meta["noun"]} model isn\'t connected yet. The dashboard looks for it at '
-                f'<code>{html.escape(meta["api"])}</code> (set <code>CHICKEN_API</code> to a tunnel URL to change it).</div>')
+def _pen_states() -> tuple[dict[str, dict[str, dict]], list[str]]:
+    """{species: {pen_id: PenStatus}} for every API that answers, plus the species that didn't."""
+    states, down = {}, []
+    for sp, meta in client.SPECIES.items():
+        try:
+            states[sp] = {p["pen_id"]: p for p in client.pens(meta["api"])}
+        except Exception:
+            down.append(sp)
+    return states, down
+
+
+def pens_html() -> str:
+    states, down = _pen_states()
+    if "pig" in down:
+        return f'<div class="oink-down">Can\'t reach the barn monitor at {html.escape(client.API)}. Is the API running?</div>'
     cards = []
-    for p in pens:
-        word, color = LEVEL.get(p["level"], ("?", "var(--oink-unsure)"))
+    for pen, animals in client.PEN_LAYOUT.items():
+        icons = " ".join(client.SPECIES[sp]["emoji"] for sp in animals)
+        live = [states[sp][pen] for sp in animals if sp in states and pen in states[sp]]
+        lines = [f'{client.SPECIES[sp]["emoji"]} {html.escape(states[sp][pen]["summary"].split(": ", 1)[-1])}'
+                 for sp in animals if sp in states and pen in states[sp]]
+        lines += [f'{client.SPECIES[sp]["emoji"]} waiting for the {sp} model' for sp in animals if sp in down]
+        if live:
+            level = max((p["level"] for p in live), key=RANK.get)
+            word, color = LEVEL[level]
+        else:
+            word, color = "Waiting", "var(--oink-unsure)"
         cards.append(
             f'<div class="oink-pen" style="background:{color}">'
-            f'<div class="name">{meta["emoji"]} Pen {html.escape(p["pen_id"])}</div>'
+            f'<div class="name">Pen {html.escape(pen)} · {icons}</div>'
             f'<div class="level">{word}</div>'
-            f'<div class="summary">{html.escape(p["summary"])}</div></div>'
+            f'<div class="summary">{"<br>".join(lines)}</div></div>'
         )
     return f'<div class="oink-pens">{"".join(cards)}</div>'
 
 
-def alert_html(species: str) -> str:
-    try:
-        a = client.latest_alert(client.SPECIES[species]["api"])
-    except Exception:
-        return ""
-    if not a:
+def _latest_alert() -> tuple[str, dict] | None:
+    best = None
+    for sp, meta in client.SPECIES.items():
+        try:
+            a = client.latest_alert(meta["api"])
+        except Exception:
+            continue
+        if a and (best is None or a["created_at"] > best[1]["created_at"]):
+            best = (sp, a)
+    return best
+
+
+def alert_html() -> str:
+    hit = _latest_alert()
+    if not hit:
         return '<div class="oink-note">No alerts yet.</div>'
+    sp, a = hit
     when = a["created_at"][11:19]
     return (
-        f'<div class="oink-alert"><b>Latest alert</b> ({when} UTC): {html.escape(a["message"])}<br>'
+        f'<div class="oink-alert"><b>Latest alert</b> {client.SPECIES[sp]["emoji"]} ({when} UTC): {html.escape(a["message"])}<br>'
         f'{html.escape(a["explanation"]["text"])}</div>'
     )
 
 
-def latest_alert_audio(species: str):
-    api = client.SPECIES[species]["api"]
+def latest_alert_audio():
+    hit = _latest_alert()
+    if not hit:
+        return None
+    sp, a = hit
     try:
-        a = client.latest_alert(api)
-        return client.audio_file(a["audio_url"], api) if a else None
+        return client.audio_file(a["audio_url"], client.SPECIES[sp]["api"])
     except Exception:
         return None
 
 
-def place_tab(species: str):
-    """The Barn tab for pigs, the Coop tab for chickens."""
-    meta, sim = client.SPECIES[species], SIMS[species]
+def refresh_barn():
+    return header_md(), pens_html(), alert_html(), sim.describe()
 
-    def refresh():
-        return header_md(), pens_html(species), alert_html(species), sim.describe()
 
-    def start(interval, ramp):
-        sim.interval_s = float(interval)
-        sim.set_ramp(ramp)
-        sim.start()
-        return sim.describe()
+def sim_start(interval, ramp, ramp_pen):
+    sim.interval_s = float(interval)
+    sim.set_ramp(ramp, ramp_pen)
+    sim.start()
+    return sim.describe()
 
-    def stop():
-        sim.stop()
-        return sim.describe()
 
-    def ramp_changed(ramp):
-        sim.set_ramp(ramp)
-        return sim.describe()
+def sim_stop():
+    sim.stop()
+    return sim.describe()
 
-    def interval_changed(interval):
-        sim.interval_s = float(interval)
-        return sim.describe()
 
-    def reset():
-        sim.stop()
+def sim_ramp(ramp, ramp_pen):
+    sim.set_ramp(ramp, ramp_pen)
+    return sim.describe()
+
+
+def sim_interval(interval):
+    sim.interval_s = float(interval)
+    return sim.describe()
+
+
+def barn_reset():
+    sim.stop()
+    for sp, meta in client.SPECIES.items():
         try:
             client.reset(meta["api"])
         except Exception as e:
-            gr.Warning(f"Reset failed: {e}")
-        sim.sent, sim.last, sim.error = 0, "", ""
-        return (*refresh(), False)
-
-    with gr.Tab(f"{meta['emoji']} {meta['place']}"):
-        pens_box = gr.HTML(lambda: pens_html(species))
-        alert_box = gr.HTML(lambda: alert_html(species))
-        with gr.Row():
-            audio_btn = gr.Button("▶ Load the call behind the latest alert", scale=0)
-            audio = gr.Audio(label="Latest alert call", interactive=False, scale=1)
-        with gr.Accordion(f"{meta['place']} simulator", open=True):
-            with gr.Row():
-                start_btn = gr.Button("Start", variant="primary")
-                stop_btn = gr.Button("Stop")
-                reset_btn = gr.Button(f"Reset {meta['place'].lower()}", variant="stop")
-            with gr.Row():
-                ramp_box = gr.Checkbox(label=f"Ramp up {meta['risk']} in Pen 3", value=False)
-                interval = gr.Slider(0.5, 10, value=2, step=0.5, label="Seconds between calls")
-            sim_md = gr.Markdown(sim.describe)
-        timer = gr.Timer(2)
-        timer.tick(refresh, outputs=[header, pens_box, alert_box, sim_md], show_progress="hidden")
-        audio_btn.click(lambda: latest_alert_audio(species), outputs=audio)
-        start_btn.click(start, [interval, ramp_box], sim_md)
-        stop_btn.click(stop, outputs=sim_md)
-        ramp_box.change(ramp_changed, ramp_box, sim_md)
-        interval.change(interval_changed, interval, sim_md)
-        reset_btn.click(reset, outputs=[header, pens_box, alert_box, sim_md, ramp_box])
+            if sp == "pig":
+                gr.Warning(f"Reset failed: {e}")
+    sim.sent, sim.unclaimed, sim.last, sim.error = 0, 0, "", ""
+    return (*refresh_barn(), False)
 
 
 # ---------- check a call ----------
@@ -234,27 +241,54 @@ def similar_updates(p: dict, species: str = "pig"):
     return out
 
 
-def check_call(path, species_name="Pig"):
-    species = next(k for k, m in client.SPECIES.items() if m["name"] == species_name)
+AUTO = "Auto (both listen)"
+
+
+def unclaimed_html(r: dict) -> str:
+    said = []
+    for sp, p in r["preds"].items():
+        meta = client.SPECIES[sp]
+        if p is None:
+            said.append(f"the {sp} model isn't connected")
+        else:
+            said.append(f"the {sp} model {'says it is' if client.claims(p) else 'says it is not'} a {meta['noun']}")
+    return (
+        '<div class="oink-verdict" style="background:var(--oink-unsure)"><div class="word">NOT SURE WHICH ANIMAL</div>'
+        f'<div class="why">{html.escape("; ".join(said).capitalize())}. Nothing is counted.</div></div>'
+    )
+
+
+def check_call(path, species_name=AUTO):
     hidden = [gr.update(visible=False)] * 3
     if not path:
         return None, "", "", *hidden
+    try:
+        fig = spectrogram(path)
+    except Exception:
+        fig = None
+    if species_name == AUTO:
+        try:
+            r = client.route(path)
+        except Exception as e:
+            return fig, f'<div class="oink-down">Prediction failed: {html.escape(str(e))}</div>', "", *hidden
+        if not r["winner"]:
+            return fig, unclaimed_html(r), "", *hidden
+        species, p = r["winner"], r["preds"][r["winner"]]
+        heard = f'<div class="oink-note">Heard as a {species} call by the {species} model.</div>'
+        return fig, heard + verdict_html(p, species), details_md(p), *similar_updates(p, species)
+    species = next(k for k, m in client.SPECIES.items() if m["name"] == species_name)
     try:
         p = client.predict(path, base=client.SPECIES[species]["api"])
     except Exception as e:
         where = client.SPECIES[species]["api"]
         msg = (f"The {species} model isn't reachable at {where} yet." if species != "pig" and client.health(where) is None
                else f"Prediction failed: {e}")
-        return None, f'<div class="oink-down">{html.escape(msg)}</div>', "", *hidden
-    try:
-        fig = spectrogram(path)
-    except Exception:
-        fig = None
+        return fig, f'<div class="oink-down">{html.escape(msg)}</div>', "", *hidden
     return fig, verdict_html(p, species), details_md(p), *similar_updates(p, species)
 
 
 def example_clips() -> list[str]:
-    clips = SIMS["pig"].clips
+    clips = sim.clips["pig"]
     picks = clips["calm"][:1] + clips["distressed"][:1]
     paths = [r["path"] for r in picks]
     esc = REPO / "data/raw/esc50/ESC-50-master/audio"
@@ -277,13 +311,36 @@ def header_md() -> str:
 
 with gr.Blocks(title="Oinkalytics barn monitor") as demo:
     header = gr.Markdown(header_md, elem_classes="oink-title")
-    for sp in client.SPECIES:
-        place_tab(sp)
+    with gr.Tab("Barn"):
+        pens_box = gr.HTML(pens_html)
+        alert_box = gr.HTML(alert_html)
+        with gr.Row():
+            alert_audio_btn = gr.Button("▶ Load the call behind the latest alert", scale=0)
+            alert_audio = gr.Audio(label="Latest alert call", interactive=False, scale=1)
+        with gr.Accordion("Barn simulator: each pen's microphone hears its animals, calm and distressed", open=True):
+            with gr.Row():
+                start_btn = gr.Button("Start", variant="primary")
+                stop_btn = gr.Button("Stop")
+                reset_btn = gr.Button("Reset barn", variant="stop")
+            with gr.Row():
+                ramp_box = gr.Checkbox(label="Ramp up distress", value=False)
+                ramp_pen = gr.Dropdown(list(client.PEN_LAYOUT), value=sim.ramp_pen, label="in pen")
+                interval = gr.Slider(0.5, 10, value=2, step=0.5, label="Seconds between calls")
+            sim_md = gr.Markdown(sim.describe)
+        timer = gr.Timer(2)
+        timer.tick(refresh_barn, outputs=[header, pens_box, alert_box, sim_md], show_progress="hidden")
+        alert_audio_btn.click(latest_alert_audio, outputs=alert_audio)
+        start_btn.click(sim_start, [interval, ramp_box, ramp_pen], sim_md)
+        stop_btn.click(sim_stop, outputs=sim_md)
+        ramp_box.change(sim_ramp, [ramp_box, ramp_pen], sim_md)
+        ramp_pen.change(sim_ramp, [ramp_box, ramp_pen], sim_md)
+        interval.change(sim_interval, interval, sim_md)
+        reset_btn.click(barn_reset, outputs=[header, pens_box, alert_box, sim_md, ramp_box])
 
     with gr.Tab("Check a call"):
         with gr.Row():
             with gr.Column(scale=1):
-                species_in = gr.Radio([m["name"] for m in client.SPECIES.values()], value="Pig", label="Animal")
+                species_in = gr.Radio([AUTO] + [m["name"] for m in client.SPECIES.values()], value=AUTO, label="Which model listens")
                 audio_in = gr.Audio(label="Upload or record a call", type="filepath", sources=["upload", "microphone"])
                 check_btn = gr.Button("Check this call", variant="primary", size="lg")
                 gr.Examples(example_clips(), inputs=audio_in, label="Try a pig call (calm, distressed, a clap)")
