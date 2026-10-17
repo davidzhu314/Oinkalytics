@@ -1,5 +1,9 @@
 """Slide charts, all from one consistent run of the shipped model (Perch emb_call + LR C=0.001).
 
+The shipped model is noise-augmented (ml/noise_train.py): in every fold the classifier trains on the
+training calls plus their noisy copies (data/emb/soundwel_noisy_train.npz) and is scored on clean calls only.
+Temperature and thresholds are the shipped ones from models/oink.joblib.
+
 python -m ml.slide_charts  ->  docs/slides/*.png and docs/slides/numbers.csv
 """
 
@@ -14,7 +18,10 @@ from sklearn.metrics import balanced_accuracy_score  # noqa: E402
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, StratifiedKFold  # noqa: E402
 
 from .perch_eval import load  # noqa: E402
-from .train_final import fit_temperature, sigmoid, valence_model  # noqa: E402
+from .train_final import DEMO_SESSIONS, sigmoid, valence_model  # noqa: E402
+import joblib  # noqa: E402
+
+NOISY_CACHE = Path(__file__).resolve().parents[1] / "data/emb/soundwel_noisy_train.npz"
 
 OUT = Path(__file__).resolve().parents[1] / "docs/slides"
 SURFACE, INK, INK2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
@@ -27,11 +34,23 @@ plt.rcParams.update({
 })
 
 
-def oof_logits(X, y, folds):
+def oof_logits(X, y, folds, noisy=None):
+    """Out-of-fold logits on clean calls; training folds also get their noisy copies when available."""
     out = np.zeros(len(y))
     for a, b in folds:
-        out[b] = valence_model().fit(X[a], y[a]).decision_function(X[b])
+        Xa, ya = X[a], y[a]
+        if noisy is not None:
+            aa = a[~np.isnan(noisy[a, 0])]
+            Xa, ya = np.vstack([Xa, noisy[aa]]), np.concatenate([ya, y[aa]])
+        out[b] = valence_model().fit(Xa, ya).decision_function(X[b])
     return out
+
+
+def noisy_copies(t):
+    """Noisy embedding for each call (NaN for demo hold-out calls, which never get one)."""
+    noisy = np.full((len(t), 1536), np.nan, dtype=np.float32)
+    noisy[~np.isin(t.session.to_numpy(), DEMO_SESSIONS)] = np.load(NOISY_CACHE)["emb_call"]
+    return noisy
 
 
 def main():
@@ -43,7 +62,8 @@ def main():
         "Recordings it\nnever heard": GroupKFold(5).split(X, y, t.session),
         "Labs it\nnever heard": LeaveOneGroupOut().split(X, y, t.team),
     }
-    logits = {k: oof_logits(X, y, f) for k, f in split_defs.items()}
+    noisy = noisy_copies(t)
+    logits = {k: oof_logits(X, y, f, noisy) for k, f in split_defs.items()}
     bal = {k: balanced_accuracy_score(y, (v > 0).astype(int)) for k, v in logits.items()}
     print({k.replace("\n", " "): round(v, 3) for k, v in bal.items()})
 
@@ -68,7 +88,7 @@ def main():
 
     # 2. Calibration (honest split; temperature fitted on the same out-of-fold logits, as shipped)
     lg = logits["Recordings it\nnever heard"]
-    T = fit_temperature(lg, y)
+    T = joblib.load(OUT.parents[1] / "models/oink.joblib")["temperature"]  # shipped temperature
     p = sigmoid(lg / T)
     conf, pred = np.maximum(p, 1 - p), (p >= 0.5).astype(int)
     edges = np.linspace(0.5, 1.0, 6)
@@ -96,7 +116,6 @@ def main():
     fig.tight_layout(rect=(0, 0.03, 1, 1)); fig.savefig(OUT / "2_calibration.png", dpi=200); plt.close(fig)
 
     # 3. The shipped verdict band: calm / unsure / distressed, vs answering every call
-    import joblib
     M = joblib.load(OUT.parents[1] / "models/oink.joblib")
     status = np.where(p >= M["alarm_at"], 1, np.where(p < M["calm_below"], 0, -1))
     dec = status >= 0

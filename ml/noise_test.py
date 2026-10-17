@@ -65,6 +65,39 @@ def boot_ci(truth, status, answered_only, rng):
     return np.nanpercentile(vals, [2.5, 97.5])
 
 
+def mix(y, nz, snr):
+    """Call + noise scaled to `snr` dB below the call's RMS, peak-limited to avoid clipping."""
+    x = y + nz * (rms(y) / rms(nz)) / (10 ** (snr / 20))
+    peak = np.abs(x).max()
+    return (x / peak * 0.99 if peak > 1 else x).astype(np.float32)
+
+
+def score(snr, truth, v, boot_rng):
+    st, ab = v["status"], v["abstain"]
+    ans = st != "unsure"
+    lo, hi = boot_ci(truth, st, True, boot_rng)
+    return dict(
+        level="clean" if snr is None else f"{snr} dB",
+        snr=np.nan if snr is None else snr,
+        answered=float(ans.mean()),
+        not_sure=float((~ans).mean()),
+        not_pig=float((ab == "not_pig").mean()),
+        low_conf=float((ab == "low_confidence").mean()),
+        bal_acc_answered=balanced(truth, st, True), ci_lo=lo, ci_hi=hi,
+        bal_acc_overall=balanced(truth, st, False),
+        calm_flagged_distressed=float((st[truth == "calm"] == "distressed").mean()),
+        distressed_caught=float((st[truth == "distressed"] == "distressed").mean()),
+        n_answered=int(ans.sum()),
+    )
+
+
+def show(row, tag=""):
+    print(f"{tag}{row['level']:>6}: answered {row['answered']:.0%} (not-a-pig {row['not_pig']:.0%}, "
+          f"low-conf {row['low_conf']:.0%}) | bal acc on answered {row['bal_acc_answered']:.3f} "
+          f"[{row['ci_lo']:.2f}-{row['ci_hi']:.2f}], n={row['n_answered']} | overall {row['bal_acc_overall']:.3f} | "
+          f"calm->distressed {row['calm_flagged_distressed']:.0%}", flush=True)
+
+
 def main():
     M = joblib.load(ROOT / "models/oink.joblib")
     demo = pd.read_csv(ROOT / "data/demo_clips.csv")
@@ -78,37 +111,11 @@ def main():
 
     rows, boot_rng = [], np.random.default_rng(SEED + 1)
     for snr in LEVELS:
-        mixed = []
-        for y, nz in zip(calls, noises):
-            if snr is None:
-                mixed.append(y)
-                continue
-            scaled = nz * (rms(y) / rms(nz)) / (10 ** (snr / 20))
-            x = y + scaled
-            peak = np.abs(x).max()
-            mixed.append((x / peak * 0.99 if peak > 1 else x).astype(np.float32))
+        mixed = [y if snr is None else mix(y, nz, snr) for y, nz in zip(calls, noises)]
         v = verdict(embed_waveforms(mixed)["emb_call"], M)
-        st, ab = v["status"], v["abstain"]
-        ans = st != "unsure"
-        lo, hi = boot_ci(truth, st, True, boot_rng)
-        row = dict(
-            level="clean" if snr is None else f"{snr} dB",
-            snr=np.nan if snr is None else snr,
-            answered=float(ans.mean()),
-            not_sure=float((~ans).mean()),
-            not_pig=float((ab == "not_pig").mean()),
-            low_conf=float((ab == "low_confidence").mean()),
-            bal_acc_answered=balanced(truth, st, True), ci_lo=lo, ci_hi=hi,
-            bal_acc_overall=balanced(truth, st, False),
-            calm_flagged_distressed=float((st[truth == "calm"] == "distressed").mean()),
-            distressed_caught=float((st[truth == "distressed"] == "distressed").mean()),
-            n_answered=int(ans.sum()),
-        )
+        row = score(snr, truth, v, boot_rng)
         rows.append(row)
-        print(f"{row['level']:>6}: answered {row['answered']:.0%} (not-a-pig {row['not_pig']:.0%}, "
-              f"low-conf {row['low_conf']:.0%}) | balanced acc on answered {row['bal_acc_answered']:.3f} "
-              f"[{lo:.2f}-{hi:.2f}], n={row['n_answered']} | overall {row['bal_acc_overall']:.3f} | "
-              f"calm->distressed {row['calm_flagged_distressed']:.0%}", flush=True)
+        show(row)
 
     r = pd.DataFrame(rows)
     r.to_csv(ROOT / "data/noise_results.csv", index=False)

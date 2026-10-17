@@ -27,15 +27,16 @@ For the team. Every number here is in [docs/slides/numbers.csv](slides/numbers.c
 
 **If Pen 3 is slow to turn red,** keep talking about step 2. The honest model says "not sure" on many distressed calls, which is a feature, not a bug. **Don't** switch to hand-picked clips. **If Wi-Fi drops,** play the backup video from step 1.
 
-## Slides (6–7, about 3 minutes with the demo)
+## Slides (7–8, about 3 minutes with the demo)
 
 1. **Title.** "Oinkalytics: we taught AI to hear when animals are stressed, before it costs the planet." Team names.
 2. **The problem.** Every animal lost before market has already used feed, water and land, and produced emissions. Stress shows in the voice before anyone sees it. A farmer can't listen to every pen; a cheap microphone can. *(Source any livestock-emissions figure before putting it on the slide. The plan's 14.5% FAO number is unverified.)*
 3. **How it works.** Pig call → Perch 2.0 (Google's bioacoustics model) → calibrated classifier → calm / distressed / not sure → dashboard + iMessage alert → "why?" answered from measured evidence only.
 4. **The gap** (`docs/slides/1_gap.png`). "Same model, same calls. Tested the usual way: 90%. On recordings it never heard: 67%. On labs it never heard: 61%. We report the honest number."
-5. **Knowing when it doesn't know** (`docs/slides/3_confidence.png`, optionally `2_calibration.png`). "When it's allowed to say 'not sure', it answers 60% of calls and gets 76% of those right. And when it says 80% confident, it's right about 80% of the time."
-6. **Same pig, two moods.** "On a second dataset with pig IDs: 86% on pigs it never heard, the same as a random split. It's hearing mood, not individual pigs. What's hard is different barns, so our next step is a real-barn test."
-7. **What we don't claim, and what's next.** Not tested in a noisy barn. Emissions impact not measured. Doesn't transfer to other species: on wild boar it scored below chance. Next: real-barn microphones, farmers labelling the calls it's unsure about, new species with their own labelled data. Credits: SoundWel (Briefer et al. 2022), Perch 2.0, ESC-50, Photon.
+5. **Knowing when it doesn't know** (`docs/slides/3_confidence.png`, optionally `2_calibration.png`). "When it's allowed to say 'not sure', it answers 64% of calls and gets 75% of those right. And when it says 80% confident, it's right about 80% of the time."
+6. **Farm noise** (`docs/slides/6_noise.png`). "We stress-tested it with farm noise and caught it getting overconfident. We retrained it with noise, tested on noise it had never heard, and halved the false alarms when the barn gets loud."
+7. **Same pig, two moods.** "On a second dataset with pig IDs: 86% on pigs it never heard, the same as a random split. It's hearing mood, not individual pigs. What's hard is different barns, so our next step is a real-barn test."
+8. **What we don't claim, and what's next.** Tested with added farm noise, not yet in a real barn. Emissions impact not measured. Doesn't transfer to other species: on wild boar it scored below chance. Next: real-barn microphones, farmers labelling the calls it's unsure about, new species with their own labelled data. Credits: SoundWel (Briefer et al. 2022), Perch 2.0, ESC-50, Photon.
 
 ## Judge Q&A
 
@@ -44,5 +45,5 @@ For the team. Every number here is in [docs/slides/numbers.csv](slides/numbers.c
 - **"Does it reduce emissions?"** Earlier intervention means fewer losses, and every loss carries wasted feed, water and emissions. We haven't measured the size of that effect.
 - **"Does it work on other animals?"** Not this classifier. We tested on wild boar and it was worse than chance. The pipeline transfers; the model needs labelled calls for each species.
 - **"Isn't this helping factory farms?"** Detecting suffering earlier helps animals in any setting, including small farms and sanctuaries.
-- **"Will it work with a cheap mic in a real barn?"** That's the next test. Our data came from research recordings.
+- **"Will it work with a cheap mic in a real barn?"** We mixed in real farm noise. Light noise barely matters; in heavy noise our retrained model says "not sure" more and keeps false alarms down (31% → 14%). A real barn adds echo and distance, so that's the next test.
 - **"How does the LLM not hallucinate?"** It only gets a JSON of measured numbers and similar calls. We scan its answer for any number not in that JSON and fall back to a template if one appears.

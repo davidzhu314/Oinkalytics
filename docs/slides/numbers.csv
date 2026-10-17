@@ -1,9 +1,9 @@
 chart,metric,value
-gap,Random split (the usual way),0.903
+gap,Random split (the usual way),0.901
 gap,Recordings it never heard,0.675
-gap,Labs it never heard,0.613
-calibration,ECE (honest split),0.03
+gap,Labs it never heard,0.612
+calibration,ECE (honest split),0.023
 verdict band,answers every call: balanced acc %,67.5
-verdict band,shipped band: share decided %,60.5
-verdict band,shipped band: balanced acc on decided %,76.1
-verdict band,calm calls flagged distressed %,20.5
+verdict band,shipped band: share decided %,63.6
+verdict band,shipped band: balanced acc on decided %,75.4
+verdict band,calm calls flagged distressed %,22.5

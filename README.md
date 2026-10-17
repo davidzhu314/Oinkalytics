@@ -21,12 +21,13 @@ We test only on **recordings the model never heard**, and we show how much the u
 | Random split (how most demos report it) | **90%**, matching the published 91.5% |
 | Recordings it never heard (leave-session-out) | **67%** |
 | Labs it never heard (leave-team-out) | **61%** |
-| When it's allowed to say "not sure" (decides 60% of calls) | **76%** on the calls it answers |
+| When it's allowed to say "not sure" (decides 64% of calls) | **75%** on the calls it answers |
 
-- **Its confidence is honest.** When it says 80% sure, it's right about 80% of the time (calibration error 0.03). See [chart](docs/slides/2_calibration.png).
+- **Its confidence is honest.** When it says 80% sure, it's right about 80% of the time (calibration error 0.02). See [chart](docs/slides/2_calibration.png).
 - **Same pig, two moods.** On a second dataset with pig IDs, the model scores 86% on pigs it never heard, the same as a random split. Within one setting it hears mood, not individual pigs. The drop to 67% comes from differences between recordings and labs, which is why a real-barn test is our next step.
 - **It knows what isn't a pig.** Claps, coughs and other everyday sounds return "I'm not sure this is a pig call". It rejected 100% of held-out non-pig clips.
-- **What we don't claim:** that it works in a noisy real barn (untested), that it cuts emissions by a specific amount (unmeasured), that it works on other species (on wild boar it scored *below* chance), or that it understands what pigs "mean". It predicts whether a call came from a positive or negative situation.
+- **Farm noise.** We mixed held-out calls with farm noise. The first model got overconfident, so we retrained it with half the noise recordings and tested on the other half: in noise louder than the call, false alarms on calm pigs fell from 31% to 14% and it says "not sure" more instead of guessing. See [chart](docs/slides/6_noise.png).
+- **What we don't claim:** that it works in a real barn (we tested added noise, not barn echo or distance), that it cuts emissions by a specific amount (unmeasured), that it works on other species (on wild boar it scored *below* chance), or that it understands what pigs "mean". It predicts whether a call came from a positive or negative situation.
 
 Full working notes: [docs/DECISIONS.md](docs/DECISIONS.md).
 

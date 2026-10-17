@@ -2,6 +2,19 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 20–21: noise-augmented model shipped (ml/noise_train.py; models/oink.joblib swapped)
+
+- **Recipe:** the 86 Bowen noise recordings are split in half by recording (seeded). Each of the 6,661 training calls gets one noisy copy using only the TRAIN half, at a random level of 20/10/5/0/−5 dB. The valence classifier is refitted on clean + noisy; temperature (1.68, was 1.55) and the distressed threshold (0.71, unchanged) are refitted on leave-session-out OOF logits of both. Pig detector, distance check and index unchanged. Old model kept as `models/oink_clean.joblib`; a one-line `cp` reverts it.
+- **Leave-session-out inside training (6,661 calls):** clean decided-accuracy 0.768 → **0.774**, all-calls 0.687 → 0.689 (unchanged); noisy decided-accuracy 0.700 → **0.755**, calm flagged 26% → **20%**.
+- **Demo hold-out (226 calls) + the TEST half of the noise (never trained on)**, old → new, accuracy on answered / calm flagged / share answered:
+  - none: 0.871 → 0.838 / 13% → 16% / 48% → 46% (within the bootstrap CI)
+  - 10 dB: 0.787 → 0.741 / 16% → 17% / 47% → 46%
+  - 0 dB: 0.621 → **0.696** / 26% → **15%** / 48% → 41%
+  - −5 dB: 0.567 → **0.657** / 31% → **14%** / 43% → 32%
+- The earlier noise table (Hour 20) used all 86 noise recordings with the old model. These old-vs-new numbers use only the test half, so the "old" rows differ slightly from that table; quote these.
+- **Headline numbers re-run with the shipped recipe** (`python -m ml.slide_charts`, each fold trains on clean + noisy copies, scored on clean): random split **90.1%**, recordings never heard **67.5%**, labs never heard **61.2%**, calibration error **0.023**, "not sure" band decides **64%** at **75.4%**, calm flagged **22.5%**. The demo hold-out with the new model decides 46% at 83% correct; all three hub showcase clips keep their verdicts. `data/demo_clips.csv` verdicts were refreshed with the new model (truth unchanged).
+- Slide line: "We stress-tested it with farm noise, caught it getting overconfident, retrained with noise it had never heard, and halved false alarms when the barn gets loud."
+
 ## Hour 20: farm-noise robustness (ml/noise_test.py → docs/slides/6_noise.png, data/noise_results.csv)
 
 All 226 demo hold-out calls mixed with poultry-farm noise (the 86 `noise` recordings of the Bowen University chicken dataset, Mendeley doi:10.17632/zp4nf2dxbh.1, CC BY 4.0; recorded in Nigeria, **not a pig barn**). One random noise segment per call, reused at every level, scaled to an SNR relative to the call's RMS. Embedded exactly as the server embeds uploads, judged by the shipped rule, now shared as `ml/verdict.py` (the server uses the same function; the clean run reproduces the logged 48% answered / 0.871).
