@@ -2,6 +2,22 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 1–2: Perch 2.0 running (setup took ~12 min of the 2 h limit)
+
+- `perch_v2_cpu` from Kaggle via kagglehub, TF 2.21, CPU only. Input is 5 s at 32 kHz. Outputs a 1536-d `embedding`, a `spatial_embedding` (16 time × 4 freq × 1536), and 14,795 labels (iNat 2024 + FSD50K).
+- About 130 ms per clip, so all ~12k clips (SoundWel + ungulate + ESC-50) take ~27 min.
+- Calls are often under 1 s, so `ml/embed.py` also saves `emb_call`: the spatial embedding averaged over only the frames the call occupies, skipping the padding. We test both.
+- **Not-a-pig check:** Perch's FSD50K classes catch claps (Clapping 8.5), coughs (Cough 12.5) and dogs (Bark 8.8). They **don't** separate pig from rooster ("Livestock" is high for both). Plan: train a pig-vs-not-pig detector on embeddings (SoundWel vs ESC-50 non-pig), plus a distance-to-training-set check.
+- ESC-50 downloaded (2,000 clips, 50 classes, CC BY-NC; fine for a hackathon).
+
+## Hour 1: second dataset (Zenodo 14636641, ungulate valence)
+
+- Lefèvre, Sypherd & Briefer 2025, CC BY 4.0. 3,181 calls from 7 species, **with animal IDs**.
+- **Pig subset: 564 calls from 30 pigs, and 26 of those pigs have both calm and stressed calls.** The only contexts are isolation (Neg) vs pair with food and toys (Pos), from Briefer et al. 2019 (ETHZ). These are very likely the same recordings as SoundWel's ETHZ team (551 calls, 311 Neg / 240 Pos), but here we know which pig made each call.
+- **Use:** a true **leave-pig-out** test on the same pigs in both moods ("same pig, two moods"), which separates mood from individual and lab. It also lets us score the whole-SoundWel model on these pigs.
+- **Stretch:** cow, goat, sheep, horse and wild boar calls for the "tomorrow, any animal" cross-species probe.
+- Audio: SoundsDatabase.zip (287 MB) in data/raw/ungulate.
+
 ## Hour 1: feature-only baseline (ml/baseline.py)
 
 Valence, using the key's 18 acoustic features, on 6,150 calls (the 737 featureless Transit calls are excluded). Pooled out-of-fold predictions; best model is HistGradientBoosting.
