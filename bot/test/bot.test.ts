@@ -224,14 +224,20 @@ test("rate limit caps replies per conversation, and the media notice is sent at 
   assert.equal(notice("chat"), true);
 });
 
-test("alerts are plain words, count calls not animals, and give one simple hint", () => {
+test("one alert message: verdict, how sure, the reason, one hint", () => {
   const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", match: /pig/, oink: fakeOink() };
   const hen: Source = { name: "Chickens", emoji: "🐔", bad: "sick", match: /chicken/, oink: fakeOink() };
-  assert.equal(alertText(pig, alert("a1", "3")),
-    "🐷 Pen 3: the pigs sound stressed. 3 of their last 5 calls sounded stressed, from one animal or several, " +
-    "so it's worth a look.\nReply \"why\" or \"play it\".");
-  assert.match(alertText(hen, alert("c1", "2")), /^🐔 Pen 2: the chickens sound sick\. 3 of their last 5 calls sounded sick/);
-  assert.doesNotMatch(alertText(pig, alert("a1")), /why pig|play pig|confidence/);
+  const withReason = { ...alert("a1", "3"), confidence: 0.78,
+    explanation: { text: "This call sounds stressed (81% sure). It sounds most like pigs recorded when separated from their group.", source: "llm" as const } };
+  assert.equal(alertText(pig, withReason),
+    "🐷 Pen 3: the pigs sound stressed (78% sure). 3 of their last 5 calls sounded stressed, from one animal or several.\n" +
+    "It sounds most like pigs recorded when separated from their group.\n" +
+    'Reply "play it" to hear the call.');
+  // a one-sentence explanation has no extra reason: two lines, no repeat of the verdict
+  const short = { ...alert("c1", "2"), confidence: 1, explanation: { text: "This recording sounds unhealthy (100% confident).", source: "template" as const } };
+  assert.equal(alertText(hen, short), "🐔 Pen 2: the chickens sound sick (100% sure). 3 of their last 5 calls sounded sick, from one animal or several.\n" +
+    'Reply "play it" to hear the call.');
+  assert.doesNotMatch(alertText(pig, withReason), /why pig|play pig|Reply "why"/);
 });
 
 test("replies tag the pen with its animal", async () => {

@@ -532,25 +532,22 @@ async function pollAlerts() {
     catch { if (sp === "pig") return; }
   }
   const ol = $("#alertList");
-  const many = Object.values(layout).some((k) => k.includes("chicken"));
   if (!list.length && alerts.size) { alerts.clear(); ol.replaceChildren(el("li", { class: "empty", text: "No alerts yet. All quiet." })); }
   list.sort((x, y) => (x.a.created_at < y.a.created_at ? -1 : 1));
   for (const { sp, a } of list) {
     const key = `${sp}:${a.alert_id}`;
     if (alerts.has(key)) { alerts.get(key).data = a; continue; }
-    const message = many ? `${SPECIES[sp].emoji} ${a.message}` : a.message;
-    const why = el("div", { class: "why", hidden: true });
+    // The same single message the Photon bot texts (bot/src/commands.ts alertText): the reason is folded in.
+    const who = sp === "pig" ? "pigs" : "chickens", bad = sp === "pig" ? "stressed" : "sick";
+    const reason = a.explanation.text.trim().split(/(?<=[.!?])\s+/).slice(1).join(" ");
+    const message = `${SPECIES[sp].emoji} Pen ${a.pen_id}: the ${who} sound ${bad} (${Math.round(a.confidence * 100)}% sure). ` +
+      `${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.`;
     const li = el("li", { class: "sms" },
       el("time", { text: new Date(a.created_at).toLocaleTimeString() }),
       message,
+      reason && el("div", { class: "why", text: reason }),
       el("div", { class: "pen-actions" },
-        el("button", { class: "btn small", text: "Why?", onclick: () => {
-          const fresh = alerts.get(key).data;
-          why.textContent = fresh.explanation.text;
-          why.hidden = !why.hidden;
-        } }),
-        el("button", { class: "btn small", text: "▶ Play it", onclick: () => play(`${SPECIES[sp].base}${a.audio_url}`) })),
-      why);
+        el("button", { class: "btn small", text: "▶ Play it", onclick: () => play(`${SPECIES[sp].base}${a.audio_url}`) })));
     alerts.set(key, { data: a, li });
     $(".empty", ol)?.remove();
     ol.prepend(li);

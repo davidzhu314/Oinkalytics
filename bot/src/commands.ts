@@ -19,14 +19,25 @@ export type Source = {
   bad?: string;
 };
 
-/** The alert text a farmer reads, built from the alert's numbers (plain words, one hint). */
+/** The reason part of an explanation: everything after its first sentence (the verdict, already in the alert). */
+export function reasonOf(explanation: string): string {
+  const parts = explanation.trim().split(/(?<=[.!?])\s+/);
+  return parts.slice(1).join(" ");
+}
+
+/** One alert message: what, how sure, the reason, and one hint. The "why" is folded in, so the farmer
+ *  doesn't have to ask (texting "why" still works). The microphone counts calls, not animals. */
 export function alertText(src: Source, a: Alert): string {
   const who = src.name.toLowerCase();
   const bad = src.bad ?? "stressed";
   const head = src.emoji ? `${src.emoji} Pen ${a.pen_id}` : `Pen ${a.pen_id}`;
-  // The microphone counts calls, not animals: say so, so nobody reads "3 calls" as "3 animals".
-  return `${head}: the ${who} sound ${bad}. ${a.distressed} of their last ${a.window} calls sounded ${bad}, ` +
-    `from one animal or several, so it's worth a look.\nReply "why" or "play it".`;
+  const sure = Math.round(a.confidence * 100);
+  const reason = reasonOf(a.explanation.text);
+  return [
+    `${head}: the ${who} sound ${bad} (${sure}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.`,
+    reason,
+    'Reply "play it" to hear the call.',
+  ].filter(Boolean).join("\n");
 }
 
 const HELP =
