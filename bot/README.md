@@ -16,7 +16,8 @@ Start the API first (`uvicorn api.mock_server:app --port 8000` from the repo roo
 | Variable | Default | Meaning |
 |---|---|---|
 | `BOT_CHANNEL` | `terminal` | `terminal` (local TUI) or `imessage` (Spectrum Cloud) |
-| `OINK_API` | `http://localhost:8000` | API base URL |
+| `OINK_API` | `http://localhost:8000` | Pig API base URL |
+| `CHICKEN_API` | off | Chicken API base URL. When set, "status" lists both species, alerts are prefixed "Pigs," / "Chickens,", and "why chicken" / "play pig" pick a species (plain "why" uses the newest alert) |
 | `FARMER_PHONE` | none | E.164 number that receives alerts. Use the dev phone while developing |
 | `ALLOWED_SENDERS` | anyone | Comma-separated senders the bot answers |
 | `BOT_MUTE` | off | `1` logs proactive alerts instead of sending them. Commands still work, and the farmer can text `mute`/`unmute` |

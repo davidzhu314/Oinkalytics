@@ -9,6 +9,7 @@ OINK_API=http://localhost:8001 .venv/bin/python dashboard/app.py  # against a mo
 
 - **Barn tab:** one big card per pen from `GET /pens` (green calm, amber watch, red alert), refreshed every 2 s, plus the latest alert and its call.
 - **Barn simulator:** posts held-out calls to `POST /predict` with a `pen_id`, cycling through the pens. "Ramp up distress in Pen 3" makes each Pen 3 call more likely to be a distressed recording than the last. "Reset barn" calls `POST /reset` on whichever API it points at.
-- **Check a call tab:** upload or record a clip to get the verdict (grey for unsure), confidence, explanation, spectrogram, measured features, the likely situation (labelled random-split accuracy) and the 3 most similar calls from other sessions.
+- **Coop tab:** the same view for chickens, from `CHICKEN_API` (default `http://localhost:8002`; set it to the chicken workstream's tunnel URL). Until that server is up it says "not connected yet". Its simulator reads `data/chicken_demo_clips.csv` (`path,truth`, truth = healthy|unhealthy, override with `CHICKEN_CLIPS`).
+- **Check a call tab:** pick Pig or Chicken, then upload or record a clip to get the verdict (grey for unsure), confidence, explanation, spectrogram, measured features, the likely situation (labelled random-split accuracy) and the 3 most similar calls from other sessions.
 
 Simulator clips come from `data/demo_clips.csv` (written by the ML session; override with `DEMO_CLIPS`). Pools are split by the **true** label, not the model's verdict, and limited to `DEMO_TEAMS` (default `ETHZ,NMBU`). Against the mock, the true label is sent as `mock_label`; the real server ignores it.

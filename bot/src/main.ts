@@ -2,10 +2,12 @@
 
 import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { handle, type BotState, type Reply } from "./commands.ts";
+import { handle, type BotState, type Reply, type Source } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
 
 const API = process.env.OINK_API ?? "http://localhost:8000";
+// Optional second species (the chicken workstream's server, local or a tunnel URL). Unset = pigs only.
+const CHICKEN_API = process.env.CHICKEN_API;
 const CHANNEL = process.env.BOT_CHANNEL ?? "terminal";
 // The farmer's phone (E.164). During development this is the dev phone, so alerts never go to anyone else.
 const FARMER = process.env.FARMER_PHONE;
@@ -13,7 +15,8 @@ const FARMER = process.env.FARMER_PHONE;
 const ALLOWED = (process.env.ALLOWED_SENDERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const state: BotState = { muted: ["1", "true", "yes"].includes((process.env.BOT_MUTE ?? "").toLowerCase()) };
 
-const oink = oinkClient(API);
+const sources: Source[] = [{ name: "Pigs", match: /\b(pigs?|barn|sows?|hogs?)\b/, oink: oinkClient(API) }];
+if (CHICKEN_API) sources.push({ name: "Chickens", match: /\b(chickens?|hens?|coop|birds?|poultry)\b/, oink: oinkClient(CHICKEN_API) });
 
 async function loadProviders() {
   if (CHANNEL === "imessage") {
@@ -67,22 +70,27 @@ async function send(space: Space, replies: Reply[]) {
   }
 }
 
-const poller = alertPoller({
-  oink,
-  state,
-  async deliver(a: Alert) {
-    const space = await resolveFarmerSpace();
-    if (!space) throw new Error("no farmer conversation yet");
-    await space.send(`${a.message}\nReply "why" or "play it".`);
-    console.log(`[alerts] sent ${a.alert_id}: ${a.message}`);
-  },
-});
+const pollers = sources.map((src) =>
+  alertPoller({
+    oink: src.oink,
+    state,
+    async deliver(a: Alert) {
+      const space = await resolveFarmerSpace();
+      if (!space) throw new Error("no farmer conversation yet");
+      const tag = sources.length > 1 ? `${src.name}, ` : "";
+      const one = src.name.toLowerCase().replace(/s$/, "");
+      const hint = sources.length > 1 ? `"why ${one}" or "play ${one}"` : '"why" or "play it"';
+      await space.send(`${tag}${a.message}\nReply ${hint}.`);
+      console.log(`[alerts] sent ${src.name} ${a.alert_id}: ${a.message}`);
+    },
+  }),
+);
 
-console.log(`[bot] channel=${CHANNEL} api=${API} muted=${state.muted} farmer=${FARMER ? "set" : "unset"}`);
-await poller.start();
+console.log(`[bot] channel=${CHANNEL} api=${API} chicken_api=${CHICKEN_API ?? "off"} muted=${state.muted} farmer=${FARMER ? "set" : "unset"}`);
+await Promise.all(pollers.map((p) => p.start()));
 
 const shutdown = async () => {
-  poller.stop();
+  for (const p of pollers) p.stop();
   await app.stop();
   process.exit(0);
 };
@@ -103,5 +111,5 @@ for await (const [space, message] of app.messages) {
   if (terminal || !FARMER || sender === FARMER) farmerSpace = space;
   const text = message.content.text.replace(/^\//, "");
   console.log(`[bot] received "${text.slice(0, 40)}"`);
-  await space.responding(async () => send(space, await handle(text, oink, state)));
+  await space.responding(async () => send(space, await handle(text, sources, state)));
 }
