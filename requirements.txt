@@ -1,0 +1,14 @@
+numpy
+pandas
+openpyxl
+librosa
+soundfile
+scikit-learn
+matplotlib
+fastapi
+uvicorn[standard]
+python-multipart
+gradio
+httpx
+python-dotenv
+jupyter

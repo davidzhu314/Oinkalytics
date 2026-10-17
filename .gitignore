@@ -1,0 +1,30 @@
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data and model caches (large; re-download with scripts/)
+data/
+*.npy
+*.npz
+*.joblib
