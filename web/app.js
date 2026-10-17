@@ -146,8 +146,11 @@ const SPECIES = {
   pig: { base: "", emoji: "🐷", noun: "pig", words: { calm: "Calm", distressed: "Distressed" }, risk: "distressed" },
   chicken: { base: "/hub-api/chicken", emoji: "🐔", noun: "chicken", words: { calm: "Healthy", distressed: "Sick" }, risk: "sick" },
 };
-const PEN_NAMES = { 1: "Clover & friends", 2: "Hazel & friends", 3: "Truffle & friends", 4: "Biscuit & friends" };
-const MIX = 1 / 6; // "Mixed calls": share of distressed calls a microphone hears
+// Each animal has a mood, set by its pen's mode: Calm = all calm, Stressed = all stressed,
+// Mixed = about a third stressed (at least one of each when there are two or more). The mood decides
+// how the animal looks and which kind of held-out call it makes; the badge, border and speech bubbles
+// show what the model heard, so a wrong verdict is visible.
+const MIXED_SHARE = 1 / 3;
 const W = 400, H = 230;
 const pens = new Map();
 let layout = { 1: ["pig"], 2: ["pig", "chicken"], 3: ["chicken"], 4: ["pig", "chicken"] };
@@ -226,7 +229,7 @@ function addAnimal(pen, kind, walkIn) {
   const x = 90 + (i % 3) * 110 + Math.random() * 20, y = 110 + (i % 2) * 50 + Math.random() * 10;
   // A new animal starts just outside the left edge of the field and walks in.
   const a = { ...n, x: walkIn ? -50 : x, y, tx: x, ty: y, rest: walkIn ? 0 : Math.random() * 2, dir: 1,
-    bob: Math.random() * 6, peck: Math.random() * 10, entering: walkIn };
+    bob: Math.random() * 6, peck: Math.random() * 10, entering: walkIn, mood: moodFor(pen) };
   const name = kind === "pig" ? "pig" : "hen";
   n.g.setAttribute("tabindex", "0");
   n.g.setAttribute("role", "button");
@@ -242,11 +245,31 @@ function addAnimal(pen, kind, walkIn) {
   if (walkIn) toast(`A new ${name} is walking into Pen ${pen.id}.`);
 }
 
-/** Click an animal: it makes a call of its own species, out loud, and the pen's microphone hears it. */
+/** A newcomer's mood follows the pen's mode. */
+function moodFor(pen) {
+  if (pen.mode === "distressed") return "distressed";
+  if (pen.mode === "mixed") return Math.random() < MIXED_SHARE ? "distressed" : "calm";
+  return "calm";
+}
+
+/** Set every animal's mood from the pen's mode (Mine keeps whatever they had). */
+function applyMode(pen) {
+  if (pen.mode === "mine") return;
+  if (pen.mode !== "mixed") {
+    for (const a of pen.animals) a.mood = pen.mode;
+    return;
+  }
+  const n = pen.animals.length;
+  const k = n >= 2 ? Math.max(1, Math.round(n * MIXED_SHARE)) : Math.random() < MIXED_SHARE ? 1 : 0;
+  const order = [...pen.animals].sort(() => Math.random() - 0.5);
+  order.forEach((a, i) => { a.mood = i < k ? "distressed" : "calm"; });
+}
+
+/** Click an animal: it makes a call of its own species and mood, out loud, and the pen's microphone hears it. */
 async function animalSpeaks(pen, a) {
   pen.card.classList.add("heard"); // the "click an animal" hint has done its job
   if (!playable(a.kind)) return toast(a.kind === "chicken" && !online.chicken ? "The chicken model isn't connected yet." : `No ${a.kind} calls to play.`);
-  const clip = clipFor(pen, a.kind);
+  const clip = clipFor(pen, a.kind, a.mood);
   play(clip.url);
   try {
     const [sp, p] = await judge(await clipBlob(clip.url), clip.name, pen.id);
@@ -275,9 +298,9 @@ function buildPen(id) {
   const summary = el("div", { class: "pen-summary", text: "No calls yet." });
   const mineBtn = el("button", { "aria-pressed": "false", title: "Your own recordings", text: "Mine" });
   const modes = {
-    mixed: el("button", { "aria-pressed": "true", title: "Mostly calm calls, about 1 in 6 stressed", text: "Mixed" }),
-    calm: el("button", { "aria-pressed": "false", title: "Only calm calls", text: "Calm" }),
-    distressed: el("button", { "aria-pressed": "false", title: "Only stressed calls", text: "Stressed" }),
+    mixed: el("button", { "aria-pressed": "true", title: "Some animals stressed, the rest calm", text: "Mixed" }),
+    calm: el("button", { "aria-pressed": "false", title: "Every animal in the pen calm", text: "Calm" }),
+    distressed: el("button", { "aria-pressed": "false", title: "Every animal in the pen stressed", text: "Stressed" }),
     mine: mineBtn,
   };
   // Only shown while the barn is running: it un-mutes this pen's automatic stream of calls.
@@ -287,7 +310,7 @@ function buildPen(id) {
   const clips = icon("📎", "Add your own recordings", "edge", "label");
   clips.append(fileIn);
   const card = el("article", { class: "pen calm" },
-    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: `${PEN_NAMES[id] || ""} · ${who}` })), badge),
+    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: who })), badge),
     el("div", { class: "field-wrap" }, svg, el("span", { class: "field-hint", text: "Click an animal to hear it" })),
     el("div", { class: "pen-foot" },
       summary,
@@ -298,6 +321,7 @@ function buildPen(id) {
   const pen = { id, kinds, card, svg, layer, animals, addBtns, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
     listen: false, level: "idle", levels: {}, last: {}, order: {} };
   for (const kind of herd(kinds)) addAnimal(pen, kind, false);
+  applyMode(pen);
   for (const [m, b] of Object.entries(modes)) b.onclick = () => setMode(pen, m);
   listen.onclick = () => { pen.listen = !pen.listen; listen.setAttribute("aria-pressed", pen.listen); };
   const addFiles = (files) => {
@@ -318,20 +342,22 @@ function setMode(pen, mode) {
   if (mode === "mine" && !pen.mine.length) return toast('Add a clip first: "＋ Add my clips", or drag a file onto the pen.');
   pen.mode = mode;
   for (const [m, b] of Object.entries(pen.modes)) b.setAttribute("aria-pressed", m === mode);
+  applyMode(pen);
 }
 
 const playable = (sp) => online[sp] && pools[sp].calm.length && pools[sp].distressed.length;
 
+/** The barn's next call: a random animal in the pen speaks, in its own mood. */
 function nextClip(pen) {
   if (pen.mode === "mine" && pen.mine.length) return pen.mine[pen.mineIdx++ % pen.mine.length];
-  const kinds = pen.kinds.filter(playable);
-  if (!kinds.length) return null;
-  return clipFor(pen, kinds[Math.floor(Math.random() * kinds.length)]);
+  const speakers = pen.animals.filter((a) => playable(a.kind));
+  if (!speakers.length) return null;
+  const a = speakers[Math.floor(Math.random() * speakers.length)];
+  return { ...clipFor(pen, a.kind, a.mood), animal: a };
 }
 
-/** A held-out call of species `sp`, calm or distressed as the pen's microphone mode says. */
-function clipFor(pen, sp) {
-  const truth = pen.mode === "distressed" ? "distressed" : pen.mode === "calm" ? "calm" : Math.random() < MIX ? "distressed" : "calm";
+/** A held-out call of species `sp` whose true label is `truth` (calm | distressed). */
+function clipFor(pen, sp, truth) {
   const key = `${sp}:${truth}`;
   if (!pen.order[key]?.length) pen.order[key] = [...pools[sp][truth]].sort(() => Math.random() - 0.5);
   const c = pen.order[key].pop();
@@ -361,7 +387,7 @@ async function feedPen(pen, aloud) {
   if (aloud) play(clip.url);
   const [sp, p] = await judge(blob, clip.name, pen.id);
   if (sp) pen.last[sp] = p;
-  speak(pen, sp, p, clip.species);
+  speak(pen, sp, p, clip.species, clip.animal);
 }
 
 function speak(pen, sp, p, heardAs, speaker) {
@@ -388,18 +414,13 @@ function speak(pen, sp, p, heardAs, speaker) {
   setTimeout(() => bubble.remove(), 2600);
 }
 
-function stressed(pen, sp) {
-  const lv = pen.levels[sp];
-  return lv === "alert" || (lv === "watch" && pen.last[sp]?.status === "distressed");
-}
-
 let lastFrame = performance.now();
 function animate(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
   for (const pen of pens.values()) {
     for (const a of pen.animals) {
-      const s = stressed(pen, a.kind);
+      const s = a.mood === "distressed";
       const hen = a.kind === "chicken";
       const speed = (s ? (hen ? 95 : 75) : (hen ? 28 : 20)) * (a.entering ? 2.5 : 1);
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
