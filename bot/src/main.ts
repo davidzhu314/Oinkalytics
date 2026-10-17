@@ -36,6 +36,13 @@ async function loadProviders() {
 const { providers, imessage, terminal } = await loadProviders();
 // Cloud iMessage authenticates through Spectrum() itself; the provider config doesn't take credentials.
 const options = { logLevel: "warn" } as const;
+// Spectrum() falls back to SPECTRUM_PROJECT_ID / SPECTRUM_PROJECT_SECRET from the environment and
+// calls Spectrum Cloud with them even for the terminal provider. Drop them there, so terminal mode
+// stays credential-free and offline-safe whatever is in .env.
+if (!imessage) {
+  delete process.env.SPECTRUM_PROJECT_ID;
+  delete process.env.SPECTRUM_PROJECT_SECRET;
+}
 const app = imessage
   ? await Spectrum({
       projectId: process.env.SPECTRUM_PROJECT_ID!,
