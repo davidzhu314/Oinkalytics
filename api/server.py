@@ -8,6 +8,7 @@ import io
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 import joblib
@@ -50,7 +51,10 @@ except ImportError:
                 "am_rate_hz": None}
 
 try:
-    from ml.explain import explain
+    from ml.explain import explain, prepare, template
+
+    def quick_explain(ev: dict) -> dict:
+        return {"text": template(prepare(ev)), "source": "template"}
 except ImportError:
     def explain(ev: dict) -> dict:
         if ev["status"] == "unsure":
@@ -68,6 +72,26 @@ except ImportError:
         if sim:
             text += f" Its closest match is a {sim['status']} call recorded during {sim['context']}."
         return {"text": text, "source": "template"}
+
+
+    quick_explain = explain  # the fallback above is template-only already
+
+EVIDENCE: dict[str, dict] = {}  # prediction_id -> evidence, so an alert can get the full explanation later
+
+
+def upgrade_explanation(alert, pred):
+    """Barn-stream calls get the instant template; when one triggers an alert, fetch the LLM
+    explanation in the background so "why?" gets it, without slowing the stream down."""
+    ev = EVIDENCE.get(pred.prediction_id)
+    if not ev:
+        return
+
+    def run():
+        e = Explanation(**explain(ev))
+        pred.explanation = e
+        alert.explanation = e
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def decode(data: bytes, filename: str) -> np.ndarray:
@@ -141,12 +165,16 @@ def real_predict(data: bytes, filename: str, pen_id=None, hint=None) -> Predicti
                 # same measurement on both sides once ml/typical.json exists; key medians until then
                 "typical": load_typical() or M["typical"],
                 "similar_calls": [s.model_dump(include={"status", "context", "similarity"}) for s in similar]}
-    expl = explain(evidence)
+    # One-off uploads (a person is waiting to read it) get the LLM; the barn stream gets the template.
+    expl = quick_explain(evidence) if pen_id else explain(evidence)
 
     clip_id = new_id("clip")
     store.put_clip(clip_id, to_wav(y))
+    pred_id = new_id("pred")
+    if pen_id:
+        EVIDENCE[pred_id] = evidence
     return Prediction(
-        prediction_id=new_id("pred"), clip_id=clip_id, pen_id=pen_id, created_at=now(),
+        prediction_id=pred_id, clip_id=clip_id, pen_id=pen_id, created_at=now(),
         status=status, abstain_reason=abstain,
         valence=Valence(p_distressed=round(p, 3), confidence=round(max(p, 1 - p), 3)),
         context_top3=context_top3, features=features, similar_calls=similar,
@@ -159,4 +187,5 @@ embed_waveforms([np.zeros(SR, np.float32)])  # warm up Perch so the first reques
 app = FastAPI(title="Oinkalytics API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(build_router(store, real_predict,
-                                Health(ok=True, mode="real", model="perch_v2 emb_call + logreg (leave-session-out 0.675)")))
+                                Health(ok=True, mode="real", model="perch_v2 emb_call + logreg (leave-session-out 0.675)"),
+                                on_alert=upgrade_explanation))

@@ -9,7 +9,8 @@ from .schemas import Alert, Health, PenStatus, Prediction
 from .state import Store
 
 
-def build_router(store: Store, predict_fn: Callable[..., Prediction], health: Health) -> APIRouter:
+def build_router(store: Store, predict_fn: Callable[..., Prediction], health: Health,
+                 on_alert: Optional[Callable[[Alert, Prediction], None]] = None) -> APIRouter:
     r = APIRouter()
 
     @r.get("/health", response_model=Health)
@@ -26,7 +27,9 @@ def build_router(store: Store, predict_fn: Callable[..., Prediction], health: He
         if not data:
             raise HTTPException(400, "empty file")
         pred = predict_fn(data, file.filename or "clip", pen_id=pen_id, hint=mock_label)
-        store.record(pred)
+        alert = store.record(pred)
+        if alert and on_alert:
+            on_alert(alert, pred)
         return pred
 
     @r.get("/predictions/{prediction_id}", response_model=Prediction)

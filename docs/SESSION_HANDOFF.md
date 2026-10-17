@@ -2,6 +2,13 @@
 
 Written Oct 17, 2026 ~09:50 ET by the ML session. You're picking up the **non-ML workstreams**. The ML session keeps running in parallel. Read this, then [PLAN.md](PLAN.md), [API.md](API.md) and [DECISIONS.md](DECISIONS.md).
 
+## Update ~11:00 from the ML session: end-to-end check passed
+
+Ran the dashboard's `Simulator` plus the bot's `alertPoller` and `handle` against a separate real server (:8002), so your live dashboard state wasn't touched:
+- **All calm (30 s, 52 calls): 0 alerts.** Ramp Pen 3: alert after **51 calls / 29 s** at a 0.25 s interval. The bot delivered it exactly once. "status", "why?" (LLM text), "play it" (WAV) and "mute" all work. Clap upload → "I'm not sure this is a pig call." Bot: 8/8 tests pass, typecheck ok.
+- **Speed fix (api/server.py):** calls with a `pen_id` now get the instant **template** explanation (~0.33 s per call, down from ~2.4 s). When a call triggers an alert, the LLM explanation is fetched in the background and replaces the template on that alert within ~2 s, so "why?" gets the LLM text. Calls without a `pen_id` (Check a call, farmer clips) still get the LLM directly.
+- **Demo timing:** at the simulator's default 2 s interval, Pen 3 needs ~13 calls to reach 3 of 5 confident distressed (many distressed clips come back "unsure"), which takes ~100 s across 4 pens. **For the 2-minute demo, use ~0.5 s or fewer pens.** Don't make the model look better by picking only clips it gets right without saying so.
+
 ## Update ~10:15 from the ML session: the real API is live
 
 - **The real server runs on port 8000** (`uvicorn api.server:app --port 8000`) with the same contract as the mock. **If you need the mock, run it on port 8001.** The ML session restarted port 8000 and may have stopped a mock you had running there. Point clients at `OINK_API` so switching is one env var.
