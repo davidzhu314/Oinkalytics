@@ -2,6 +2,25 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 12: Perch results, and the model we ship (ml/perch_eval.py, ml/perch_sweep.py)
+
+Valence on all 6,887 calls with logistic regression on `emb_call`. Balanced accuracy:
+
+| Split | Perch | Feature baseline* |
+|---|---|---|
+| Random (naive) | **0.904** (reproduces the paper's 91.5%) | 0.854 |
+| Leave-session-out (honest) | **0.675** (C=0.001) | 0.631 |
+| Leave-team-out | ~0.58 | 0.576 |
+
+*The feature baseline is on the 6,150-call subset; on that same subset Perch scores 0.62 leave-session-out, about the same.
+
+- **Perch learns the recording conditions very well and the mood only modestly.** The gap is **90% → 67.5%** for the same model. That's the gap slide.
+- None of the fixes beat it: stronger regularisation helped a little (C=0.001 is best); **per-session normalisation hurt** (0.56, because single-valence sessions lose their signal); adding the key features didn't help.
+- **Confidence means something:** at ≥0.8 confidence (58% of calls), balanced accuracy is 0.715 and plain accuracy 0.82. At ≥0.9 (34% of calls), 0.718 and 0.84.
+- **Pen-level alert (3 of 5 calls):** stressed pens are flagged **94%** of the time, but calm pens wrongly alert **43%** of the time. False alarms are the weak spot, so Tier 2 calibration should raise the "distressed" threshold.
+- **Decision: ship Perch `emb_call` + LogisticRegression(C=0.001, balanced).** It works on any raw audio, the same embeddings power similar calls and the not-a-pig check, and it matches or beats the feature baseline under the honest split. The key's features can't be computed for uploaded clips anyway.
+- **Stopped tuning here** (time box). Fine-tuning stays out of scope.
+
 ## Hour 1–2: Perch 2.0 running (setup took ~12 min of the 2 h limit)
 
 - `perch_v2_cpu` from Kaggle via kagglehub, TF 2.21, CPU only. Input is 5 s at 32 kHz. Outputs a 1536-d `embedding`, a `spatial_embedding` (16 time × 4 freq × 1536), and 14,795 labels (iNat 2024 + FSD50K).
