@@ -2,6 +2,25 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 21–22: Egyptian fruit bats; aggression doesn't hold up, a time-of-day confound (ml/bat_prep.py, ml/bat_eval.py)
+
+**Data.** Prat, Taub, Pratt & Yovel 2017 (*Scientific Data*), Figshare collection 10.6084/m9.figshare.c.3666502, **CC0**. Archives files220 + files222 with Annotations.csv + FileInfo.csv: **5,536 annotated calls** with a known caller, **10 juvenile bats** (born in the lab, ~7–9 months old), groups of five in two colony chambers (treatments 16–19), **28 days**, Tel Aviv University lab colony (**not a zoo**). Each annotated segment cut from its 250 kHz recording and resampled to 32 kHz for Perch (keeps < 16 kHz). Unknown, isolation, separation and landing contexts dropped.
+- **The Hugging Face `cgeorgiaw/animal-sounds` bat subset is unusable for behaviour:** its metadata is only `emitter` + `file_name`, and its file numbers aren't the original FileIDs (emitter agrees on 0.1% of overlaps).
+
+**Aggression (biting, fighting, mating protest, threat-like; 795 calls) vs all other calls,** Perch + balanced LR (C=0.001):
+
+| Split | Balanced acc | AUC |
+|---|---|---|
+| random | 0.653 | 0.708 |
+| days it never heard | 0.629 | 0.692 |
+| chamber groups it never heard | 0.577 | 0.604 |
+| **bats it never heard** | **0.546** | **0.587** |
+| call duration only (shortcut check) | 0.52 | 0.52 |
+
+- **Aggression vs feeding + general only** (dropping the sleeping-spot squabbles, 1,743 calls) looked much better: bats-out 0.734 / AUC 0.80, days-out 0.771 / AUC 0.85. **But it's confounded with time of day:** hour of recording alone gives AUC **0.872** on days it never heard (recording channel alone 0.774), because aggression calls are mostly daytime (roosting) and feeding/general mostly night. With time held roughly fixed (night only, n = 313), Perch bats-out AUC is **0.564**. **Don't present the 73–77%.**
+- **Individual identity is real:** which of 10 bats is calling, from one call: 67% (balanced 50%) on a random split, **65% (balanced 48%) on days it never heard**; chance is 10%. Partly helped by chamber/channel (five bats per chamber).
+- **Conclusion:** no honest bat-welfare (aggression) detector from this data. It's the third confound we've caught (pigs: lab; chickens: recording; bats: time of day). Perch hears *who* is calling much better than *what kind* of interaction it is.
+
 ## Hour 21: cross-species training doesn't help (ml/cross_species.py, data/cross_species.csv); not shipped
 
 Added the non-pig calls of the ungulate valence database (Zenodo 14636641, CC BY 4.0; cow, goat, sheep, horse, Przewalski's horse, wild boar; 2,617 calls, 84% negative) to every training fold of the headline test (shipped recipe: clean + noisy SoundWel). Its pig calls were excluded: they're near-copies of SoundWel ETHZ, including a demo hold-out session.
