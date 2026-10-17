@@ -1,5 +1,16 @@
 /** Everything the bot reads from the environment, in one place. */
 
+import { existsSync } from "node:fs";
+
+// Load bot/.env before anything below reads process.env. Node has done this
+// natively since 20.12, so there is no dotenv dependency to install.
+const envFile = process.env.BOT_ENV_FILE ?? ".env";
+if (existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+  console.log(`[config] loaded ${envFile}`);
+}
+
+
 const bool = (v: string | undefined, fallback: boolean) =>
   v === undefined ? fallback : ["1", "true", "yes", "on"].includes(v.toLowerCase());
 
