@@ -60,6 +60,8 @@ async function health() {
     const r = await api("/health");
     h.textContent = r.mode === "real" ? "● Live model" : "● Mock model";
     h.className = "health ok";
+    try { await api("/hub-api/chicken/health"); online.chicken = true; } catch { online.chicken = false; }
+    if (Object.values(layout).some((k) => k.includes("chicken"))) h.textContent += online.chicken ? " · 🐔 connected" : " · 🐔 not connected";
   } catch {
     h.textContent = "● API offline";
     h.className = "health bad";
@@ -138,10 +140,26 @@ function renderResult(box, p, opts = {}) {
 }
 
 // ---------- Barn ----------
+// Pens hold pigs, chickens or both (layout from /hub-api/clips). Each call goes to every model that's
+// online ("both listen"); the one that recognises its own animal judges it and counts it in the pen.
+const SPECIES = {
+  pig: { base: "", emoji: "🐷", noun: "pig", words: { calm: "Calm", distressed: "Distressed" }, risk: "distressed" },
+  chicken: { base: "/hub-api/chicken", emoji: "🐔", noun: "chicken", words: { calm: "Healthy", distressed: "Sick" }, risk: "sick" },
+};
 const PEN_NAMES = { 1: "Clover & friends", 2: "Hazel & friends", 3: "Truffle & friends", 4: "Biscuit & friends" };
+const MIX = 1 / 6; // "Mixed calls": share of distressed calls a microphone hears
 const W = 400, H = 230;
 const pens = new Map();
-let pool = { calm: [], distressed: [] };
+let layout = { 1: ["pig"], 2: ["pig", "chicken"], 3: ["chicken"], 4: ["pig", "chicken"] };
+let pools = { pig: { calm: [], distressed: [] }, chicken: { calm: [], distressed: [] } };
+const online = { pig: true, chicken: false };
+
+function predictAt(sp, blob, name, penId) {
+  const fd = new FormData();
+  fd.append("file", blob, name);
+  if (penId) fd.append("pen_id", penId);
+  return api(`${SPECIES[sp].base}/predict`, { method: "POST", body: fd });
+}
 
 function pigNode() {
   const flip = el("g", { class: "flip" },
@@ -159,7 +177,26 @@ function pigNode() {
     el("circle", { class: "ink", cx: 34.5, cy: -4, r: 1.2 }),
     el("circle", { class: "ink", cx: 24, cy: -11, r: 1.7 }));
   const emote = el("text", { class: "emote", x: 0, y: -30, fill: "var(--alert)" });
-  return { g: el("g", { class: "pig" }, flip, emote), flip, emote };
+  return { kind: "pig", g: el("g", { class: "pig" }, flip, emote), flip, emote, mouth: [33, -4], bubbleY: -46 };
+}
+
+function chickenNode() {
+  const head = el("g", { class: "head" },
+    el("circle", { class: "feather", cx: 12, cy: -12, r: 7 }),
+    el("path", { class: "comb", d: "M7,-18 q0,-6 3,-3 q1,-6 3.5,-2 q2,-5 3.5,0.5 z" }),
+    el("path", { class: "beak", d: "M18.5,-13.5 l6.5,2 l-6.5,2.2 z" }),
+    el("path", { class: "comb", d: "M17.5,-9 q2,5 -1.5,4.5 q-1,-2 0,-4.5 z" }),
+    el("circle", { class: "ink", cx: 14.5, cy: -13.5, r: 1.4 }));
+  const flip = el("g", { class: "flip" },
+    el("ellipse", { cx: 0, cy: 16, rx: 15, ry: 3, fill: "rgba(60,50,20,.18)" }),
+    el("path", { class: "cleg leg-a", d: "M-4,8 L-5,16 M-5,16 l-3,1 M-5,16 l3,1" }),
+    el("path", { class: "cleg leg-b", d: "M4,8 L5,16 M5,16 l-3,1 M5,16 l3,1" }),
+    el("path", { class: "feather", d: "M-12,-1 q-9,-13 -2,-18 q3,8 9,10 z" }),
+    el("ellipse", { class: "feather", cx: 0, cy: 0, rx: 15, ry: 11 }),
+    el("path", { class: "wing", d: "M-8,-3 q5,11 14,2 q-6,-6 -14,-2 z" }),
+    head);
+  const emote = el("text", { class: "emote", x: 0, y: -28, fill: "var(--alert)" });
+  return { kind: "chicken", g: el("g", { class: "chicken" }, flip, emote), flip, emote, head, mouth: [24, -11], bubbleY: -40 };
 }
 
 function fieldSvg() {
@@ -175,25 +212,38 @@ function fieldSvg() {
     posts);
 }
 
+function herd(kinds) {
+  if (kinds.length > 1) return ["pig", "pig", "chicken", "chicken"];
+  return kinds[0] === "chicken" ? ["chicken", "chicken", "chicken", "chicken"] : ["pig", "pig", "pig"];
+}
+
 function buildPen(id) {
+  const kinds = layout[id] || ["pig"];
   const svg = fieldSvg();
   const layer = el("g");
   svg.append(layer);
-  const pigs = [0, 1, 2].map((i) => {
-    const n = pigNode();
+  const members = herd(kinds);
+  const animals = members.map((kind, i) => {
+    const n = kind === "pig" ? pigNode() : chickenNode();
     layer.append(n.g);
-    const x = 70 + i * 110, y = 110 + (i % 2) * 45;
-    return { ...n, x, y, tx: x, ty: y, rest: Math.random() * 2, dir: 1, bob: Math.random() * 6 };
+    const x = 60 + i * (290 / Math.max(1, members.length - 1)), y = 105 + (i % 2) * 50;
+    return { ...n, x, y, tx: x, ty: y, rest: Math.random() * 2, dir: 1, bob: Math.random() * 6, peck: Math.random() * 10 };
   });
 
+  const who = kinds.map((k) => `${SPECIES[k].emoji} ${SPECIES[k].noun}s`).join(" + ");
   const badge = el("span", { class: "badge idle", text: "○ Quiet" });
   const summary = el("div", { class: "pen-summary", text: "No calls yet." });
   const mineBtn = el("button", { "aria-pressed": "false", text: "My clips (0)" });
-  const modes = { calm: el("button", { "aria-pressed": "true", text: "Calm calls" }), distressed: el("button", { "aria-pressed": "false", text: "Stressed calls" }), mine: mineBtn };
+  const modes = {
+    mixed: el("button", { "aria-pressed": "true", text: "Mixed" }),
+    calm: el("button", { "aria-pressed": "false", text: "Calm calls" }),
+    distressed: el("button", { "aria-pressed": "false", text: "Stressed calls" }),
+    mine: mineBtn,
+  };
   const listen = el("button", { class: "btn small listen", "aria-pressed": "false", text: "🔊 Listen" });
   const fileIn = el("input", { type: "file", accept: "audio/*,video/*,.m4a,.mp4,.mov,.caf", multiple: true, hidden: true });
   const card = el("article", { class: "pen calm" },
-    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: PEN_NAMES[id] || "" })), badge),
+    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: `${PEN_NAMES[id] || ""} · ${who}` })), badge),
     svg,
     el("div", { class: "pen-foot" },
       summary,
@@ -203,7 +253,8 @@ function buildPen(id) {
         listen,
         el("label", { class: "btn small" }, "＋ Add my clips", fileIn))));
 
-  const pen = { id, card, svg, pigs, badge, summary, modes, mineBtn, mode: "calm", mine: [], mineIdx: 0, listen: false, level: "idle", last: null, order: [] };
+  const pen = { id, kinds, card, svg, animals, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
+    listen: false, level: "idle", levels: {}, last: {}, order: {} };
   for (const [m, b] of Object.entries(modes)) b.onclick = () => setMode(pen, m);
   listen.onclick = () => { pen.listen = !pen.listen; listen.setAttribute("aria-pressed", pen.listen); };
   const addFiles = (files) => {
@@ -226,50 +277,72 @@ function setMode(pen, mode) {
   for (const [m, b] of Object.entries(pen.modes)) b.setAttribute("aria-pressed", m === mode);
 }
 
+const playable = (sp) => online[sp] && pools[sp].calm.length && pools[sp].distressed.length;
+
 function nextClip(pen) {
   if (pen.mode === "mine" && pen.mine.length) return pen.mine[pen.mineIdx++ % pen.mine.length];
-  const list = pool[pen.mode === "distressed" ? "distressed" : "calm"];
-  if (!list.length) return null;
-  if (!pen.order.length || pen.order.src !== pen.mode) {
-    pen.order = [...list].sort(() => Math.random() - 0.5);
-    pen.order.src = pen.mode;
+  const kinds = pen.kinds.filter(playable);
+  if (!kinds.length) return null;
+  const sp = kinds[Math.floor(Math.random() * kinds.length)];
+  const truth = pen.mode === "distressed" ? "distressed" : pen.mode === "calm" ? "calm" : Math.random() < MIX ? "distressed" : "calm";
+  const key = `${sp}:${truth}`;
+  if (!pen.order[key]?.length) pen.order[key] = [...pools[sp][truth]].sort(() => Math.random() - 0.5);
+  const c = pen.order[key].pop();
+  return { name: c.name, url: c.url, species: sp };
+}
+
+/** Both models listen; returns [species, prediction counted in the pen] or [null, null] if no single model claims it. */
+async function judge(blob, name, penId) {
+  const listeners = Object.keys(SPECIES).filter((sp) => online[sp]);
+  if (listeners.length === 1) {
+    const p = await predictAt(listeners[0], blob, name, penId); // a model's own "not my animal" is skipped by its pen window
+    return p.abstain_reason === "not_pig" ? [null, p] : [listeners[0], p];
   }
-  const c = pen.order.pop();
-  return { name: c.name, url: c.url };
+  const heard = await Promise.all(listeners.map((sp) => predictAt(sp, blob, name, null).catch(() => null)));
+  const claimed = listeners.filter((sp, i) => heard[i] && heard[i].abstain_reason !== "not_pig");
+  if (claimed.length !== 1) return [null, null];
+  return [claimed[0], await predictAt(claimed[0], blob, name, penId)];
 }
 
 async function feedPen(pen, aloud) {
   const clip = nextClip(pen);
-  if (!clip) return;
+  if (!clip) {
+    if (aloud) toast(pen.kinds.includes("chicken") && !online.chicken ? "The chicken model isn't connected yet." : "No clips to play.");
+    return;
+  }
   const blob = clip.file || (await clipBlob(clip.url));
   if (aloud) play(clip.url);
-  const p = await predict(blob, clip.name, pen.id);
-  pen.last = p;
-  speak(pen, p);
+  const [sp, p] = await judge(blob, clip.name, pen.id);
+  if (sp) pen.last[sp] = p;
+  speak(pen, sp, p, clip.species);
 }
 
-function speak(pen, p) {
-  const pig = pen.pigs[Math.floor(Math.random() * pen.pigs.length)];
-  const label = p.status === "calm" ? `Calm · ${pct(p.valence.confidence)}`
-    : p.status === "distressed" ? `Distressed · ${pct(p.valence.confidence)}`
-    : p.abstain_reason === "not_pig" ? "Not a pig?" : "Not sure";
-  const color = p.status === "calm" ? "var(--calm)" : p.status === "distressed" ? "var(--alert)" : "var(--unsure)";
+function speak(pen, sp, p, heardAs) {
+  const kind = sp || heardAs;
+  const pool = pen.animals.filter((a) => a.kind === kind);
+  const who = (pool.length ? pool : pen.animals)[Math.floor(Math.random() * (pool.length || pen.animals.length))];
+  let label, color = "var(--unsure)";
+  if (!sp) label = "Which animal?";
+  else if (p.status === "calm") { label = `${SPECIES[sp].words.calm} · ${pct(p.valence.confidence)}`; color = "var(--calm)"; }
+  else if (p.status === "distressed") { label = `${SPECIES[sp].words.distressed} · ${pct(p.valence.confidence)}`; color = "var(--alert)"; }
+  else label = p.abstain_reason === "not_pig" ? `Not a ${SPECIES[sp].noun}?` : "Not sure";
   const w = label.length * 7 + 18;
-  const bubble = el("g", { class: "bubble", transform: "translate(0,-46)" },
+  const bubble = el("g", { class: "bubble", transform: `translate(0,${who.bubbleY})` },
     el("rect", { x: -w / 2, y: -12, width: w, height: 24, rx: 12 }),
     el("text", { x: 0, y: 1, fill: color, text: label }));
-  // Sound ripple from the snout (SMIL: animates SVG attributes reliably in every browser).
-  const ripple = el("circle", { class: "ripple", cx: 33, cy: -4, r: 6 },
+  const [mx, my] = who.mouth;
+  const ripple = el("circle", { class: `ripple ${who.kind}`, cx: mx * who.dir, cy: my, r: 6 },
     el("animate", { attributeName: "r", from: 6, to: 30, dur: "0.9s", fill: "freeze" }),
     el("animate", { attributeName: "opacity", from: 0.7, to: 0, dur: "0.9s", fill: "freeze" }));
-  pig.g.append(ripple, bubble);
+  who.g.append(ripple, bubble);
   ripple.querySelectorAll("animate").forEach((a) => a.beginElement?.());
   setTimeout(() => ripple.remove(), 1000);
   setTimeout(() => bubble.remove(), 2600);
 }
 
-function stressed(pen) {
-  return pen.level === "alert" || pen.level === "watch" && pen.last?.status === "distressed";
+function stressed(pen, sp) {
+  const lv = pen.levels[sp];
+  return lv === "alert" || (lv === "watch" && pen.last[sp]?.status === "distressed");
 }
 
 let lastFrame = performance.now();
@@ -277,55 +350,79 @@ function animate(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
   for (const pen of pens.values()) {
-    const s = stressed(pen);
-    const speed = s ? 75 : 20;
-    for (const pig of pen.pigs) {
-      const dx = pig.tx - pig.x, dy = pig.ty - pig.y, d = Math.hypot(dx, dy);
-      if (pig.rest > 0) pig.rest -= dt;
+    for (const a of pen.animals) {
+      const s = stressed(pen, a.kind);
+      const hen = a.kind === "chicken";
+      const speed = s ? (hen ? 95 : 75) : (hen ? 28 : 20);
+      const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
+      if (a.rest > 0) a.rest -= dt;
       else if (d < 2) {
-        pig.tx = 45 + Math.random() * (W - 90);
-        pig.ty = 85 + Math.random() * (H - 115);
-        pig.rest = s ? Math.random() * 0.3 : 0.8 + Math.random() * 3;
+        a.tx = 45 + Math.random() * (W - 90);
+        a.ty = 85 + Math.random() * (H - 115);
+        a.rest = s ? Math.random() * 0.3 : hen ? 0.4 + Math.random() * 2 : 0.8 + Math.random() * 3;
       } else {
         const step = Math.min(d, speed * dt);
-        pig.x += (dx / d) * step;
-        pig.y += (dy / d) * step;
-        if (Math.abs(dx) > 1) pig.dir = dx < 0 ? -1 : 1;
+        a.x += (dx / d) * step;
+        a.y += (dy / d) * step;
+        if (Math.abs(dx) > 1) a.dir = dx < 0 ? -1 : 1;
       }
-      const walking = pig.rest <= 0 && d >= 2;
-      pig.bob += dt * (s ? 22 : 9);
-      const bob = walking ? Math.sin(pig.bob) * 1.4 : 0;
-      const shake = s ? Math.sin(now / 35 + pig.x) * 1.2 : 0;
-      pig.g.setAttribute("transform", `translate(${(pig.x + shake).toFixed(1)},${(pig.y + bob).toFixed(1)})`);
-      pig.flip.setAttribute("transform", `scale(${pig.dir},1)`);
-      pig.g.classList.toggle("walking", walking);
-      pig.g.classList.toggle("stressed", s);
-      pig.emote.textContent = s && Math.sin(now / 300 + pig.x) > 0.2 ? "!" : "";
+      const walking = a.rest <= 0 && d >= 2;
+      a.bob += dt * (s ? 22 : hen ? 14 : 9);
+      // pigs bob; chickens hop
+      const bob = walking ? (hen ? -Math.abs(Math.sin(a.bob)) * 3 : Math.sin(a.bob) * 1.4) : 0;
+      const shake = s ? Math.sin(now / 35 + a.x) * 1.2 : 0;
+      a.g.setAttribute("transform", `translate(${(a.x + shake).toFixed(1)},${(a.y + bob).toFixed(1)})`);
+      a.flip.setAttribute("transform", `scale(${a.dir},1)`);
+      if (hen) {
+        // calm hens peck at the ground while resting
+        a.peck += dt * 6;
+        const pecking = !walking && !s && Math.sin(a.peck * 0.35) > 0.3;
+        a.head.setAttribute("transform", pecking ? `rotate(${(28 + Math.sin(a.peck * 4) * 10).toFixed(1)},8,-6)` : "");
+      }
+      a.g.classList.toggle("walking", walking);
+      a.g.classList.toggle("stressed", s);
+      a.emote.textContent = s && Math.sin(now / 300 + a.x) > 0.2 ? "!" : "";
     }
   }
-  // keep pigs drawn in depth order
+  // keep animals drawn in depth order
   for (const pen of pens.values()) {
-    const layer = pen.pigs[0].g.parentNode;
-    [...pen.pigs].sort((a, b) => a.y - b.y).forEach((p) => layer.append(p.g));
+    const layer = pen.animals[0].g.parentNode;
+    [...pen.animals].sort((a, b) => a.y - b.y).forEach((a) => layer.append(a.g));
   }
   requestAnimationFrame(animate);
 }
 
-const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Alert", idle: "○ Quiet" };
+const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Alert", idle: "○ Quiet", waiting: "○ Waiting" };
+const RANK = { idle: 0, calm: 1, watch: 2, alert: 3 };
 async function pollPens() {
-  try {
-    for (const s of await api("/pens")) {
-      const pen = pens.get(s.pen_id);
-      if (!pen) continue;
-      pen.level = s.window ? s.level : "idle";
-      pen.badge.className = `badge ${pen.level}`;
-      pen.badge.textContent = LEVEL[pen.level];
-      pen.card.className = `pen ${pen.level}`;
-      pen.summary.replaceChildren(s.window
-        ? el("span", {}, el("b", { text: `${s.distressed} of last ${s.window}` }), " confident calls sounded distressed")
-        : "No calls yet.");
+  const states = {};
+  for (const sp of Object.keys(SPECIES)) {
+    if (!online[sp]) continue;
+    try { states[sp] = Object.fromEntries((await api(`${SPECIES[sp].base}/pens`)).map((s) => [s.pen_id, s])); }
+    catch { /* down: shown as waiting */ }
+  }
+  for (const pen of pens.values()) {
+    const parts = [];
+    let level = "idle";
+    for (const sp of pen.kinds) {
+      const s = states[sp]?.[pen.id];
+      if (!s) {
+        pen.levels[sp] = "idle";
+        if (sp !== "pig") parts.push(el("span", {}, `${SPECIES[sp].emoji} waiting for the ${sp} model`));
+        continue;
+      }
+      pen.levels[sp] = s.window ? s.level : "idle";
+      if (RANK[pen.levels[sp]] > RANK[level]) level = pen.levels[sp];
+      if (s.window) parts.push(el("span", {}, `${SPECIES[sp].emoji} `, el("b", { text: `${s.distressed} of last ${s.window}` }), ` sounded ${SPECIES[sp].risk}`));
     }
-  } catch { /* API down: the health chip says so */ }
+    if (level === "idle" && !pen.kinds.some((sp) => states[sp])) level = "waiting";
+    pen.level = level;
+    pen.badge.className = `badge ${level === "waiting" ? "idle" : level}`;
+    pen.badge.textContent = LEVEL[level];
+    pen.card.className = `pen ${level === "waiting" ? "idle" : level}`;
+    const shown = parts.length ? parts.flatMap((p, i) => (i ? [el("br"), p] : [p])) : ["No calls yet."];
+    pen.summary.replaceChildren(...shown);
+  }
 }
 
 // ---------- Barn simulator ----------
@@ -333,8 +430,8 @@ let running = false;
 async function barnLoop() {
   let i = 0;
   while (running) {
-    // Pens hearing stressed calls or your clips get two turns per round; calm pens get one.
-    const order = [...pens.values()].flatMap((p) => (p.mode === "calm" ? [p] : [p, p]));
+    // Pens hearing stressed calls or your clips get two turns per round; the others get one.
+    const order = [...pens.values()].flatMap((p) => (p.mode === "distressed" || p.mode === "mine" ? [p, p] : [p]));
     const pen = order[i++ % order.length];
     const t0 = performance.now();
     try { await feedPen(pen, pen.listen); } catch (e) { toast(`Couldn't check a call: ${e.message}`); }
@@ -352,28 +449,36 @@ function setRunning(on) {
 const alerts = new Map();
 let alertsLoaded = false;
 async function pollAlerts() {
-  let list;
-  try { list = await api("/alerts"); } catch { return; }
+  const list = [];
+  for (const sp of Object.keys(SPECIES)) {
+    if (!online[sp]) continue;
+    try { for (const a of await api(`${SPECIES[sp].base}/alerts`)) list.push({ sp, a }); }
+    catch { if (sp === "pig") return; }
+  }
   const ol = $("#alertList");
+  const many = Object.values(layout).some((k) => k.includes("chicken"));
   if (!list.length && alerts.size) { alerts.clear(); ol.replaceChildren(el("li", { class: "empty", text: "No alerts yet. All quiet." })); }
-  for (const a of list) {
-    if (alerts.has(a.alert_id)) { alerts.get(a.alert_id).data = a; continue; }
+  list.sort((x, y) => (x.a.created_at < y.a.created_at ? -1 : 1));
+  for (const { sp, a } of list) {
+    const key = `${sp}:${a.alert_id}`;
+    if (alerts.has(key)) { alerts.get(key).data = a; continue; }
+    const message = many ? `${SPECIES[sp].emoji} ${a.message}` : a.message;
     const why = el("div", { class: "why", hidden: true });
     const li = el("li", { class: "sms" },
       el("time", { text: new Date(a.created_at).toLocaleTimeString() }),
-      a.message,
+      message,
       el("div", { class: "pen-actions" },
         el("button", { class: "btn small", text: "Why?", onclick: () => {
-          const fresh = alerts.get(a.alert_id).data;
+          const fresh = alerts.get(key).data;
           why.textContent = fresh.explanation.text;
           why.hidden = !why.hidden;
         } }),
-        el("button", { class: "btn small", text: "▶ Play it", onclick: () => play(a.audio_url) })),
+        el("button", { class: "btn small", text: "▶ Play it", onclick: () => play(`${SPECIES[sp].base}${a.audio_url}`) })),
       why);
-    alerts.set(a.alert_id, { data: a, li });
+    alerts.set(key, { data: a, li });
     $(".empty", ol)?.remove();
     ol.prepend(li);
-    if (alertsLoaded) toast(`📱 Texted the farmer: ${a.message}`);
+    if (alertsLoaded) toast(`📱 Texted the farmer: ${message}`);
   }
   alertsLoaded = true;
 }
@@ -446,21 +551,21 @@ async function toggleRecord() {
 
 // ---------- Boot ----------
 async function boot() {
-  health();
   setInterval(health, 10000);
 
   let ids = ["1", "2", "3", "4"];
   try { ids = (await api("/pens")).map((p) => p.pen_id); } catch { /* use defaults */ }
-  $("#pens").replaceChildren(...ids.map(buildPen));
-  requestAnimationFrame(animate);
-
   try {
     const c = await api("/hub-api/clips");
-    pool = c.pool;
+    pools = { pig: c.pool, chicken: c.chicken_pool || { calm: [], distressed: [] } };
+    if (c.layout) layout = c.layout;
     $("#showcase").replaceChildren(...c.showcase.map(buildCase));
   } catch (e) {
     $("#showcase").replaceChildren(el("p", { class: "sub", text: `Demo clips unavailable (${e.message}).` }));
   }
+  await health();
+  $("#pens").replaceChildren(...ids.map(buildPen));
+  requestAnimationFrame(animate);
 
   $("#barnToggle").onclick = () => setRunning(!running);
   const speed = $("#speed");
@@ -468,7 +573,8 @@ async function boot() {
   $("#barnReset").onclick = async () => {
     setRunning(false);
     await api("/reset", { method: "POST" });
-    for (const pen of pens.values()) pen.last = null;
+    if (online.chicken) await api("/hub-api/chicken/reset", { method: "POST" }).catch(() => {});
+    for (const pen of pens.values()) pen.last = {};
     pollPens(); pollAlerts();
     toast("Barn reset.");
   };

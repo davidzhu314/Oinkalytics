@@ -13,6 +13,11 @@
   --pig: #f2a3b3;
   --pig-dark: #e07b93;
   --pig-ink: #7a3344;
+  --hen: #fbf8f1;
+  --hen-line: #d9cfbd;
+  --hen-wing: #ece3d2;
+  --comb: #d9453b;
+  --beak: #e8a33d;
   --barn: #b5462f;
   --calm: #2f8f4e;
   --calm-bg: #e3f2e4;
@@ -129,6 +134,18 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 @keyframes legA { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
 .pig.stressed .body { fill: #f08a8a; }
 .pig.stressed .dark { fill: #d4646a; }
+.chicken .feather { fill: var(--hen); stroke: var(--hen-line); stroke-width: 1; }
+.chicken .wing { fill: var(--hen-wing); }
+.chicken .comb { fill: var(--comb); }
+.chicken .beak { fill: var(--beak); }
+.chicken .ink { fill: var(--pig-ink); }
+.chicken .cleg { fill: none; stroke: var(--beak); stroke-width: 2.2; stroke-linecap: round; }
+.chicken.walking .leg-a { animation: legA .22s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: top center; }
+.chicken.walking .leg-b { animation: legA .22s ease-in-out infinite alternate-reverse; transform-box: fill-box; transform-origin: top center; }
+.chicken.stressed .wing { animation: flap .12s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 30% 20%; }
+.chicken.stressed .feather { fill: #f6dcd6; }
+@keyframes flap { from { transform: rotate(0deg); } to { transform: rotate(-38deg); } }
+.ripple.chicken { stroke: var(--beak); }
 .emote { font: 800 18px system-ui, sans-serif; text-anchor: middle; }
 .bubble rect { fill: var(--surface); stroke: var(--line); }
 .bubble text { font: 750 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }
