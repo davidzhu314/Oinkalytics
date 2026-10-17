@@ -12,3 +12,5 @@ gradio
 httpx
 python-dotenv
 jupyter
+tensorflow
+kagglehub
