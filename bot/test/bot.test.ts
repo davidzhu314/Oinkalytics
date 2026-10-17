@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handle, parse, penOf, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
+import { classify, onceEvery, rateLimiter } from "../src/guard.ts";
 import type { Alert, Oink } from "../src/oink.ts";
 
 const alert = (id: string, pen = "3"): Alert => ({
@@ -197,4 +198,28 @@ test("pen-scoped why and play", async () => {
   assert.equal((why1 as { text: string }).text, "No alerts from Pen 1 yet.");
   const play = await handle("play pen 2", pigs(oink), { muted: false });
   assert.equal(play[1].kind === "audio" && play[1].name, "pen-2-call.wav");
+});
+
+test("only real inbound texts get answered; receipts, typing and our own messages never do", () => {
+  assert.equal(classify("inbound", "text"), "text");
+  assert.equal(classify("inbound", "attachment"), "media");
+  assert.equal(classify("inbound", "voice"), "media");
+  for (const t of ["read", "typing", "reaction", "edit", "unsend", "effect", "richlink"]) assert.equal(classify("inbound", t), "ignore", t);
+  assert.equal(classify("outbound", "text"), "ignore");
+});
+
+test("rate limit caps replies per conversation, and the media notice is sent at most every 2 min", () => {
+  let now = 0;
+  const rl = rateLimiter(5, 10_000, () => now);
+  const ok = Array.from({ length: 8 }, () => rl.allow("chat"));
+  assert.deepEqual(ok, [true, true, true, true, true, false, false, false]);
+  assert.equal(rl.allow("other chat"), true);
+  now = 10_001;
+  assert.equal(rl.allow("chat"), true);
+  const notice = onceEvery(120_000, () => now);
+  assert.equal(notice("chat"), true);
+  now += 60_000;
+  assert.equal(notice("chat"), false);
+  now += 61_000;
+  assert.equal(notice("chat"), true);
 });

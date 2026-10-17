@@ -5,6 +5,7 @@ import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "s
 import { oinkClient, type Alert } from "./oink.ts";
 import { handle, type BotState, type Reply, type Source } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
+import { classify, onceEvery, rateLimiter } from "./guard.ts";
 
 const API = process.env.OINK_API ?? "http://localhost:8000";
 // Optional second species (the chicken workstream's server, local or a tunnel URL). Unset = pigs only.
@@ -135,16 +136,34 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
+const replies = rateLimiter(5, 10_000); // hard cap per conversation, whatever triggers a reply
+const mediaNotice = onceEvery(120_000);
+const ignoredTypes = new Set<string>();
+
 for await (const [space, message] of app.messages) {
   const sender = message.sender?.id ?? "unknown";
+  const kind = classify(message.direction, message.content.type);
+  if (kind === "ignore") {
+    // Read receipts, typing, reactions, our own outbound messages: never answer these.
+    if (!ignoredTypes.has(message.content.type)) {
+      ignoredTypes.add(message.content.type);
+      console.log(`[bot] ignoring ${message.direction} "${message.content.type}" messages`);
+    }
+    continue;
+  }
   if (ALLOWED.length && !ALLOWED.includes(sender)) {
     console.log(`[bot] ignoring sender not on ALLOWED_SENDERS`);
     continue;
   }
-  if (message.content.type !== "text") {
-    await space.send('I can only read text for now. Try "status", "why" or "play it".');
+  if (!replies.allow(space.id)) {
+    console.log("[bot] reply rate limit hit; not answering");
     continue;
   }
+  if (kind === "media") {
+    if (mediaNotice(space.id)) await space.send('I can only read text for now. Try "status", "why" or "play it".');
+    continue;
+  }
+  if (message.content.type !== "text") continue;
   // Remember the farmer's conversation for alerts (any sender in terminal mode).
   if (terminal || !FARMER || sender === FARMER) rememberSpace(space);
   const text = message.content.text.replace(/^\//, "");
