@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oinkalytics</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23f2a3b3'/%3E%3Cellipse cx='16' cy='19' rx='8' ry='6' fill='%23e07b93'/%3E%3Ccircle cx='13' cy='19' r='1.6' fill='%237a3344'/%3E%3Ccircle cx='19' cy='19' r='1.6' fill='%237a3344'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#barn">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="var(--pig)"/><ellipse cx="16" cy="19" rx="8" ry="6" fill="var(--pig-dark)"/><circle cx="13" cy="19" r="1.6" fill="var(--pig-ink)"/><circle cx="19" cy="19" r="1.6" fill="var(--pig-ink)"/></svg>
+      Oinkalytics
+    </a>
+    <nav>
+      <a href="#barn">Barn</a>
+      <a href="#think">Hear it think</a>
+      <a href="#try">Try your own</a>
+      <a href="#tested">How we tested</a>
+    </nav>
+    <span id="health" class="health">Connecting…</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>We taught AI to hear when pigs are stressed.</h1>
+      <p>It listens to every call in the barn and answers calm, distressed or "I'm not sure", then texts the farmer when a pen starts to sound wrong. We only score it on recordings it has <em>never heard</em>.</p>
+    </section>
+
+    <!-- BARN -->
+    <section id="barn" class="section">
+      <div class="section-head">
+        <div>
+          <h2>The barn</h2>
+          <p class="sub">Each pen has a microphone. Pick what each pen hears, or drop your own recordings onto it.</p>
+        </div>
+        <div class="controls">
+          <button id="barnToggle" class="btn primary">▶ Start the barn</button>
+          <label class="speed">Every <input id="speed" type="range" min="0.5" max="5" step="0.5" value="1"> <output id="speedOut">1 s</output></label>
+          <button id="barnReset" class="btn ghost">Reset</button>
+        </div>
+      </div>
+
+      <div class="barn-layout">
+        <div id="pens" class="pens"></div>
+        <aside class="alerts">
+          <h3>📱 Texts to the farmer</h3>
+          <p class="sub small">What the Photon bot sends. Reply "why?" or "play it", or use the buttons.</p>
+          <ol id="alertList" class="alert-list"><li class="empty">No alerts yet. All quiet.</li></ol>
+        </aside>
+      </div>
+    </section>
+
+    <!-- HEAR IT THINK -->
+    <section id="think" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Hear it think</h2>
+          <p class="sub">Three sounds, picked in advance from recordings the model never trained on. Press play to hear each one out loud, then watch the AI explain its verdict using only what it measured.</p>
+        </div>
+        <div class="controls"><button id="runAll" class="btn primary">▶ Play all three</button></div>
+      </div>
+      <div id="showcase" class="cases"></div>
+    </section>
+
+    <!-- TRY YOUR OWN -->
+    <section id="try" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Try your own</h2>
+          <p class="sub">Upload a voice memo, MP4 or audio file, or record one here. Anything that isn't a pig should come back as "I'm not sure".</p>
+        </div>
+      </div>
+      <div class="try-grid">
+        <div class="drop" id="tryDrop">
+          <p><strong>Drop a file here</strong><br><span class="sub small">wav, m4a, mp3, mp4, mov</span></p>
+          <div class="row">
+            <label class="btn">Choose file<input id="tryFile" type="file" accept="audio/*,video/*,.m4a,.mp4,.mov,.caf" hidden></label>
+            <button id="tryRec" class="btn">● Record</button>
+          </div>
+          <p id="tryStatus" class="sub small"></p>
+        </div>
+        <div id="tryResult" class="case result-only"><p class="sub">Your result shows up here.</p></div>
+      </div>
+    </section>
+
+    <!-- HOW WE TESTED -->
+    <section id="tested" class="section">
+      <div class="section-head">
+        <div>
+          <h2>How we tested</h2>
+          <p class="sub">Most demos test on a random shuffle of calls, so the model has already heard the same room and microphone. We test on recordings it has never heard, and report that number.</p>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>90%</b><span>random split (the usual way)</span></div>
+        <div class="stat hl"><b>67%</b><span>recordings it never heard</span></div>
+        <div class="stat"><b>76%</b><span>when it's allowed to say "not sure"</span></div>
+        <div class="stat"><b>86%</b><span>pigs it never heard, within one study</span></div>
+      </div>
+      <div class="charts">
+        <figure><img src="slides/1_gap.png" alt="Balanced accuracy: 90% on a random split, 67% on recordings it never heard, 61% on labs it never heard; chance is 50%."></figure>
+        <figure><img src="slides/2_calibration.png" alt="Calibration: when the model says 80% confident it is right about 80% of the time."></figure>
+        <figure><img src="slides/3_confidence.png" alt="Answering every call scores 67%; saying not sure on 40% of calls scores 76% on the rest."></figure>
+      </div>
+      <p class="sub small">Balanced accuracy, where guessing scores 50%. Data: SoundWel (Briefer et al. 2022, CC BY 4.0). Model: Perch 2.0 embeddings + calibrated logistic regression. Not yet tested in a noisy real barn.</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
