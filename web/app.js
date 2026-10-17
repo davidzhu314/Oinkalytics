@@ -235,12 +235,16 @@ function addAnimal(pen, kind, walkIn) {
   n.g.addEventListener("pointerdown", (e) => { if (e.button === 0) { e.preventDefault(); animalSpeaks(pen, a); } });
   n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
   pen.animals.push(a);
-  for (const b of pen.addBtns) b.disabled = pen.animals.length >= MAX_ANIMALS;
+  for (const b of pen.addBtns) {
+    b.disabled = pen.animals.length >= MAX_ANIMALS;
+    b.dataset.n = pen.animals.filter((x) => x.kind === b.dataset.kind).length; // count badge
+  }
   if (walkIn) toast(`A new ${name} is walking into Pen ${pen.id}.`);
 }
 
 /** Click an animal: it makes a call of its own species, out loud, and the pen's microphone hears it. */
 async function animalSpeaks(pen, a) {
+  pen.card.classList.add("heard"); // the "click an animal" hint has done its job
   if (!playable(a.kind)) return toast(a.kind === "chicken" && !online.chicken ? "The chicken model isn't connected yet." : `No ${a.kind} calls to play.`);
   const clip = clipFor(pen, a.kind);
   play(clip.url);
@@ -257,32 +261,44 @@ function buildPen(id) {
   const layer = el("g");
   svg.append(layer);
   const animals = [];
-  const addBtns = kinds.map((k) => el("button", { class: "btn small", text: k === "pig" ? "＋ Pig" : "＋ Hen",
-    title: `Walk a new ${k === "pig" ? "pig" : "hen"} into this pen`, onclick: () => addAnimal(pen, k, true) }));
+  // Compact round icon buttons with a hover/focus tooltip (data-tip); the label is also the aria-label.
+  const icon = (glyph, tip, cls = "", tag = "button") => el(tag, { class: `ic ${cls}`, "data-tip": tip, "aria-label": tip, text: glyph });
+  const addBtns = kinds.map((k) => {
+    const b = icon(k === "pig" ? "＋🐷" : "＋🐔", `Walk a new ${k === "pig" ? "pig" : "hen"} in`, "add");
+    b.dataset.kind = k;
+    b.onclick = () => addAnimal(pen, k, true);
+    return b;
+  });
 
   const who = kinds.map((k) => `${SPECIES[k].emoji} ${SPECIES[k].noun}s`).join(" + ");
   const badge = el("span", { class: "badge idle", text: "○ Quiet" });
   const summary = el("div", { class: "pen-summary", text: "No calls yet." });
-  const mineBtn = el("button", { "aria-pressed": "false", text: "My clips (0)" });
+  const mineBtn = el("button", { "aria-pressed": "false", title: "Your own recordings", text: "Mine" });
   const modes = {
-    mixed: el("button", { "aria-pressed": "true", text: "Mixed" }),
-    calm: el("button", { "aria-pressed": "false", text: "Calm calls" }),
-    distressed: el("button", { "aria-pressed": "false", text: "Stressed calls" }),
+    mixed: el("button", { "aria-pressed": "true", title: "Mostly calm calls, about 1 in 6 stressed", text: "Mixed" }),
+    calm: el("button", { "aria-pressed": "false", title: "Only calm calls", text: "Calm" }),
+    distressed: el("button", { "aria-pressed": "false", title: "Only stressed calls", text: "Stressed" }),
     mine: mineBtn,
   };
-  const listen = el("button", { class: "btn small listen", "aria-pressed": "false", text: "🔊 Listen" });
+  const listen = icon("🔊", "Listen: play calls out loud", "toggle");
+  listen.setAttribute("aria-pressed", "false");
   const fileIn = el("input", { type: "file", accept: "audio/*,video/*,.m4a,.mp4,.mov,.caf", multiple: true, hidden: true });
+  const clips = icon("📎", "Add your own recordings", "", "label");
+  clips.append(fileIn);
   const card = el("article", { class: "pen calm" },
     el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: `${PEN_NAMES[id] || ""} · ${who}` })), badge),
-    svg,
+    el("div", { class: "field-wrap" }, svg, el("span", { class: "field-hint", text: "Click an animal to hear it" })),
     el("div", { class: "pen-foot" },
       summary,
-      el("div", { class: "pen-actions" }, el("span", { class: "sub small", text: "Microphone hears:" }), el("div", { class: "seg" }, Object.values(modes))),
-      el("div", { class: "pen-actions" },
-        el("button", { class: "btn small", onclick: () => feedPen(pen, true), text: "▶ Play next call" }),
-        listen,
-        el("label", { class: "btn small" }, "＋ Add my clips", fileIn)),
-      el("div", { class: "pen-actions" }, addBtns, el("span", { class: "sub small", text: "Click an animal to hear it." }))));
+      el("div", { class: "pen-tools" },
+        el("div", { class: "seg", role: "group", "aria-label": "What this pen's microphone hears" }, Object.values(modes)),
+        el("div", { class: "tools" },
+          icon("▶", "Play the next call", "play"),
+          listen,
+          el("span", { class: "tools-sep", "aria-hidden": "true" }),
+          addBtns,
+          clips))));
+  card.querySelector(".ic.play").onclick = () => feedPen(pen, true);
 
   const pen = { id, kinds, card, svg, layer, animals, addBtns, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
     listen: false, level: "idle", levels: {}, last: {}, order: {} };
@@ -291,7 +307,7 @@ function buildPen(id) {
   listen.onclick = () => { pen.listen = !pen.listen; listen.setAttribute("aria-pressed", pen.listen); };
   const addFiles = (files) => {
     for (const f of files) pen.mine.push({ file: f, name: f.name, url: URL.createObjectURL(f) });
-    mineBtn.textContent = `My clips (${pen.mine.length})`;
+    mineBtn.textContent = `Mine (${pen.mine.length})`;
     if (pen.mine.length) setMode(pen, "mine");
     toast(`Pen ${id} will now hear your ${pen.mine.length} clip${pen.mine.length === 1 ? "" : "s"}.`);
   };
