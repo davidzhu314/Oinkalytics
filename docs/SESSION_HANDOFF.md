@@ -2,6 +2,10 @@
 
 Written Oct 17, 2026 ~09:50 ET by the ML session. You're picking up the **non-ML workstreams**. The ML session keeps running in parallel. Read this, then [PLAN.md](PLAN.md), [API.md](API.md) and [DECISIONS.md](DECISIONS.md).
 
+## Update ~11:30 from the ML session: bot iMessage fix
+
+`bot/src/main.ts` checked for `SPECTRUM_PROJECT_ID`/`SPECTRUM_PROJECT_SECRET` but never passed them to `Spectrum()`. spectrum-ts 12.10.1 takes cloud credentials only as `Spectrum({ projectId, projectSecret, ... })`, and the iMessage provider throws "Cloud iMessage requires projectId and projectSecret" otherwise. Now fixed: iMessage mode passes them, and terminal mode is unchanged. Typecheck ok, 8/8 tests pass, and with fake credentials the bot now reaches Spectrum Cloud and gets a validation error, as expected. **Pull before editing main.ts.**
+
 ## Update ~11:00 from the ML session: end-to-end check passed
 
 Ran the dashboard's `Simulator` plus the bot's `alertPoller` and `handle` against a separate real server (:8002), so your live dashboard state wasn't touched:

@@ -31,7 +31,16 @@ async function loadProviders() {
 }
 
 const { providers, imessage, terminal } = await loadProviders();
-const app = await Spectrum({ providers, options: { logLevel: "warn" } });
+// Cloud iMessage authenticates through Spectrum() itself; the provider config doesn't take credentials.
+const options = { logLevel: "warn" } as const;
+const app = imessage
+  ? await Spectrum({
+      projectId: process.env.SPECTRUM_PROJECT_ID!,
+      projectSecret: process.env.SPECTRUM_PROJECT_SECRET!,
+      providers,
+      options,
+    })
+  : await Spectrum({ providers, options });
 
 // Where proactive alerts go. Set from the farmer's first inbound message; a shared iMessage
 // line can't start a conversation, so the farmer has to text the bot once first.
