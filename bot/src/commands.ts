@@ -13,7 +13,7 @@ export type Source = { name: string; match: RegExp; oink: Oink };
 
 const HELP =
   "I watch the barn microphones and text you when a pen sounds distressed.\n" +
-  'Text "status" for every pen, "why" for the reason behind the latest alert, ' +
+  'Text "status" for every pen, "why" for the reason behind the latest alert (or "why pen 3"), ' +
   '"play it" to hear the call, or "mute" / "unmute" for alerts.';
 
 const UNREACHABLE = "I can't reach the barn monitor right now. Try again in a minute.";
@@ -25,15 +25,27 @@ export function normalize(text: string): string {
 
 type Command = "status" | "why" | "play" | "mute" | "unmute" | "help";
 
+// Checked in this order, anywhere in the message, so a judge's natural phrasing works:
+// "how's the coop doing", "what's wrong in pen 3", "can I hear it", "please stop the alerts".
+const INTENTS: [Command, RegExp][] = [
+  ["unmute", /\b(unmute|unsilence|resume|turn (the )?alerts? (back )?on|alerts? (back )?on|start (the )?alerts?)\b/],
+  ["mute", /\b(mute|silence|shh+|stop (the )?(alerts?|texts?|messages?)|turn (the )?alerts? off|alerts? off)\b/],
+  ["play", /\b(play|listen|hear|sound(ed)? like|send (me )?(the )?(audio|clip|call|recording))\b/],
+  ["why", /\b(why|explain|reason|what (happened|went wrong|s wrong|is wrong|caused)|what s going on with|details?)\b/],
+  ["status", /\b(status|pens?|barn|coop|update|overview|summary|check|everything|how (s|is|are)|how (re|are) (they|the)|what s (up|going on|happening)|any(thing)? (news|wrong|problems?))\b/],
+  ["help", /\b(help|hi|hello|hey|yo|start|commands?|what can you do|menu)\b/],
+];
+
 export function parse(text: string): Command | undefined {
   const t = normalize(text);
-  if (/^(status|pens?|how are (they|the (pigs|chickens|hens|birds)))\b/.test(t)) return "status";
-  if (/^(why|explain|reason)\b/.test(t)) return "why";
-  if (/^(play|listen|hear)\b/.test(t)) return "play";
-  if (/^unmute\b/.test(t)) return "unmute";
-  if (/^mute\b/.test(t)) return "mute";
-  if (/^(help|hi|hello|hey|start|\?)\b/.test(t) || t === "") return "help";
+  if (t === "" || t === "?") return "help";
+  for (const [cmd, re] of INTENTS) if (re.test(t)) return cmd;
   return undefined;
+}
+
+/** "why pen 3", "play pen2", "what's wrong in pen #4" -> "3" / "2" / "4". */
+export function penOf(text: string): string | undefined {
+  return normalize(text).match(/\bpen ?(\d+)\b/)?.[1];
 }
 
 /** "why chicken" -> only the chicken source; plain "why" -> all of them. */
@@ -44,13 +56,13 @@ function pick(text: string, sources: Source[]): Source[] {
 }
 
 /** Newest alert across the chosen sources. Only the main source being down is an error. */
-async function latest(chosen: Source[], main: Source): Promise<{ hit?: { src: Source; alert: Alert }; down: Source[] }> {
+async function latest(chosen: Source[], main: Source, pen?: string): Promise<{ hit?: { src: Source; alert: Alert }; down: Source[] }> {
   let hit: { src: Source; alert: Alert } | undefined;
   const down: Source[] = [];
   for (const src of chosen) {
     let a: Alert | undefined;
     try {
-      a = await src.oink.latestAlert();
+      a = await src.oink.latestAlert(pen);
     } catch (err) {
       if (src === main) throw err;
       down.push(src);
@@ -84,16 +96,16 @@ export async function handle(text: string, sources: Source[], state: BotState): 
       }
       case "why": {
         const chosen = pick(text, sources);
-        const { hit, down } = await latest(chosen, sources[0]);
+        const { hit, down } = await latest(chosen, sources[0], penOf(text));
         if (!hit && down.length === chosen.length) return say(`${down.map((s) => s.name).join(", ")}: monitor not connected.`);
-        if (!hit) return say("No alerts yet. Every pen has been calm so far.");
+        if (!hit) return say(penOf(text) ? `No alerts from Pen ${penOf(text)} yet.` : "No alerts yet. Every pen has been calm so far.");
         return say(`${label(hit.src, hit.alert.pen_id)}: ${hit.alert.explanation.text}`);
       }
       case "play": {
         const chosen = pick(text, sources);
-        const { hit, down } = await latest(chosen, sources[0]);
+        const { hit, down } = await latest(chosen, sources[0], penOf(text));
         if (!hit && down.length === chosen.length) return say(`${down.map((s) => s.name).join(", ")}: monitor not connected.`);
-        if (!hit) return say("No alerts yet, so there's no call to play.");
+        if (!hit) return say(penOf(text) ? `No alerts from Pen ${penOf(text)} yet, so there's no call to play.` : "No alerts yet, so there's no call to play.");
         const bytes = await hit.src.oink.audio(hit.alert.audio_url);
         const who = many ? `${hit.src.name.toLowerCase()}-` : "";
         return [

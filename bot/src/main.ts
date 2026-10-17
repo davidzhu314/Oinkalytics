@@ -1,5 +1,6 @@
 // Oinkalytics Photon bot. BOT_CHANNEL=terminal (default, no credentials) or imessage (Spectrum Cloud).
 
+import { readFileSync, writeFileSync } from "node:fs";
 import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
 import { handle, type BotState, type Reply, type Source } from "./commands.ts";
@@ -53,8 +54,37 @@ const app = imessage
   : await Spectrum({ providers, options });
 
 // Where proactive alerts go. Set from the farmer's first inbound message; a shared iMessage
-// line can't start a conversation, so the farmer has to text the bot once first.
+// line can't start a conversation, so the farmer has to text the bot once first. The conversation
+// id is saved to bot/.farmer-space.json (gitignored), so a restart mid-demo still reaches them.
 let farmerSpace: Space | undefined;
+const SPACE_FILE = new URL("../.farmer-space.json", import.meta.url);
+
+function rememberSpace(space: Space) {
+  if (farmerSpace?.id === space.id) return;
+  farmerSpace = space;
+  try {
+    writeFileSync(SPACE_FILE, JSON.stringify({ channel: CHANNEL, id: space.id, saved_at: new Date().toISOString() }) + "\n");
+  } catch (err) {
+    console.error("[bot] couldn't save the farmer's conversation:", err);
+  }
+}
+
+async function restoreSpace() {
+  let saved: { channel?: string; id?: string };
+  try {
+    saved = JSON.parse(readFileSync(SPACE_FILE, "utf8"));
+  } catch {
+    return; // nothing saved yet
+  }
+  if (saved.channel !== CHANNEL || !saved.id) return;
+  try {
+    if (imessage) farmerSpace = await imessage(app).space.get(saved.id);
+    else if (terminal) farmerSpace = await terminal(app).space.get(saved.id);
+    if (farmerSpace) console.log("[bot] restored the farmer's conversation from the last run");
+  } catch (err) {
+    console.error("[bot] couldn't reopen the saved conversation; the farmer needs to text once:", err);
+  }
+}
 
 async function resolveFarmerSpace(): Promise<Space | undefined> {
   if (farmerSpace) return farmerSpace;
@@ -94,6 +124,7 @@ const pollers = sources.map((src) =>
 );
 
 console.log(`[bot] channel=${CHANNEL} api=${API} chicken_api=${CHICKEN_API ?? "off"} muted=${state.muted} farmer=${FARMER ? "set" : "unset"}`);
+await restoreSpace();
 await Promise.all(pollers.map((p) => p.start()));
 
 const shutdown = async () => {
@@ -115,7 +146,7 @@ for await (const [space, message] of app.messages) {
     continue;
   }
   // Remember the farmer's conversation for alerts (any sender in terminal mode).
-  if (terminal || !FARMER || sender === FARMER) farmerSpace = space;
+  if (terminal || !FARMER || sender === FARMER) rememberSpace(space);
   const text = message.content.text.replace(/^\//, "");
   console.log(`[bot] received "${text.slice(0, 40)}"`);
   await space.responding(async () => send(space, await handle(text, sources, state)));

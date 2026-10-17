@@ -25,5 +25,7 @@ Start the API first (`uvicorn api.mock_server:app --port 8000` from the repo roo
 
 How it behaves:
 - **Alerts** poll `GET /alerts` every 2 s. On startup the cursor jumps to the newest alert, so a restart never re-sends old ones. If a send fails, it's retried on the next poll.
-- **A shared iMessage line can't start a conversation.** The farmer has to text the bot once (for example "status") before alerts can reach them. The bot remembers that conversation.
+- **A shared iMessage line can't start a conversation.** The farmer has to text the bot once (for example "status") before alerts can reach them. The bot saves that conversation to `bot/.farmer-space.json` (gitignored), so after a restart alerts still reach the farmer without them texting again.
+- **Natural phrasing works.** Commands are found anywhere in the message: "how's the coop doing?" or "any problems?" give the status, "what's wrong in pen 3?" explains, "can I hear it?" plays the call, "stop the alerts" mutes. Add "pen 3" to "why" or "play" for one pen.
+- **Terminal mode never contacts Photon.** Spectrum would otherwise pick up `SPECTRUM_PROJECT_ID`/`SECRET` from `.env` even for the terminal provider.
 - On a shared line, only the registered sender's messages reach the bot, so the demo phone does the texting.

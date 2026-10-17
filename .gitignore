@@ -28,3 +28,6 @@ data/
 *.npy
 *.npz
 *.joblib
+
+# Bot runtime state (the farmer conversation id)
+bot/.farmer-space.json

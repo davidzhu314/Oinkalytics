@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handle, parse, type BotState, type Source } from "../src/commands.ts";
+import { handle, parse, penOf, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
 import type { Alert, Oink } from "../src/oink.ts";
 
@@ -34,9 +34,9 @@ function fakeOink(alerts: Alert[] = [], opts: { down?: boolean; summary?: string
       const i = after ? alerts.findIndex((a) => a.alert_id === after) : -1;
       return alerts.slice(i + 1);
     },
-    async latestAlert() {
+    async latestAlert(penId?: string) {
       check();
-      return alerts.at(-1);
+      return alerts.filter((a) => !penId || a.pen_id === penId).at(-1);
     },
     async audio() {
       check();
@@ -162,4 +162,39 @@ test("chicken monitor down: pigs still answer, chickens say not connected", asyn
   assert.match((why as { text: string }).text, /^Pigs, Pen 3:/);
   const [whyHen] = await handle("why chicken", sources, { muted: false });
   assert.equal((whyHen as { text: string }).text, "Chickens: monitor not connected.");
+});
+
+test("natural phrasing a judge might use", () => {
+  const cases: [string, string | undefined][] = [
+    ["How's the coop doing?", "status"],
+    ["what's going on", "status"],
+    ["Any problems?", "status"],
+    ["Give me an update", "status"],
+    ["What's wrong in pen 3?", "why"],
+    ["what happened", "why"],
+    ["Can I hear it?", "play"],
+    ["what does it sound like", "play"],
+    ["send me the audio", "play"],
+    ["please stop the alerts", "mute"],
+    ["turn alerts back on", "unmute"],
+    ["Is the barn quiet?", "status"],
+    ["Why is pen 3 on alert?", "why"],
+    ["what can you do", "help"],
+    ["", "help"],
+    ["the weather is nice", undefined],
+  ];
+  for (const [text, want] of cases) assert.equal(parse(text), want, text);
+});
+
+test("pen-scoped why and play", async () => {
+  const oink = fakeOink([alert("a1", "2"), alert("a2", "3")]);
+  assert.equal(penOf("why pen 2?"), "2");
+  assert.equal(penOf("What's wrong in Pen #4"), "4");
+  assert.equal(penOf("why"), undefined);
+  const [why2] = await handle("why pen 2", pigs(oink), { muted: false });
+  assert.match((why2 as { text: string }).text, /^Pen 2:/);
+  const [why1] = await handle("why pen 1", pigs(oink), { muted: false });
+  assert.equal((why1 as { text: string }).text, "No alerts from Pen 1 yet.");
+  const play = await handle("play pen 2", pigs(oink), { muted: false });
+  assert.equal(play[1].kind === "audio" && play[1].name, "pen-2-call.wav");
 });

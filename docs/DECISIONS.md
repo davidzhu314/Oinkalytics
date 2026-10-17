@@ -2,6 +2,16 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 16: Photon credentials, and the chicken add-on checked on the Mac
+
+**Photon credentials.** The bot uses Spectrum (`spectrum-ts`). Its `SPECTRUM_PROJECT_ID` is a **UUID** (`8-4-4-4-12` hex) from David's own Photon project settings, with that project's secret. `pho_prj_…` / `pho_sk_…` keys (the Photon beta dashboard's API keys) are a different API and fail Spectrum's param validation with a 422, which is all the `feat/photon-bot` branch ever reached. `main`'s bot is the canonical one and is live on iMessage. Terminal mode now ignores cloud credentials, so a bad value in `.env` can't break the offline demo.
+
+**Chicken add-on (branch `chicken`, docs/CHICKEN.md), reproduced on the Mac:**
+- Leave-recording-out balanced accuracy **0.996**, naive split 0.997 (gap +0.001), 12 held-out recordings all scored exactly 0.0 or 1.0. **Not an accuracy result**: the two folders are separable by recording properties.
+- Independent simple-feature check (7 loudness/spectrum features, one row per recording, 5-fold): **0.921**; loudness alone **0.811**; spectral roll-off alone **0.890**. (CHICKEN.md's 0.938 uses its own feature set; the conclusion is the same.)
+- **Cross-species check for mixed pens** (no pen, nothing counted): pig calls → chicken model **20/20 rejected**; ESC-50 non-bird sounds → chicken model **12/12 rejected**; held-out chicken recordings → pig model **11/12 rejected** (the 12th "not sure", which no pen counts); chicken-farm noise → pig model 6/6 rejected. So "both models listen" works without retraining either detector.
+- Speed: a new chicken recording takes ~2 s on the barn path (with a pen) and ~5 s without (LLM explanation); long held-out recordings (up to 5.4 min) stall the barn, so the hold-out should prefer short recordings.
+
 ## Hour 12–13: slide charts and "same pig, two moods"
 
 **Slide charts** (`python -m ml.slide_charts` → `docs/slides/`, numbers in `docs/slides/numbers.csv`). All come from one run of the shipped model (C=0.001), so these are the numbers to quote:
