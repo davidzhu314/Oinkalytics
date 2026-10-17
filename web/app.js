@@ -414,6 +414,8 @@ function speak(pen, sp, p, heardAs, speaker) {
   setTimeout(() => bubble.remove(), 2600);
 }
 
+// Respect "reduce motion": animals stay put (new ones still walk in).
+const REDUCED_MOTION = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 let lastFrame = performance.now();
 function animate(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
@@ -422,14 +424,14 @@ function animate(now) {
     for (const a of pen.animals) {
       const s = a.mood === "distressed";
       const hen = a.kind === "chicken";
-      const speed = (s ? (hen ? 45 : 38) : (hen ? 28 : 20)) * (a.entering ? 2.5 : 1);
+      const speed = (hen ? 18 : 14) * (a.entering ? 3.5 : 1) * (REDUCED_MOTION && !a.entering ? 0 : 1);
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
       if (a.entering && d < 2) a.entering = false;
       if (a.rest > 0) a.rest -= dt;
       else if (d < 2) {
         a.tx = 45 + Math.random() * (W - 90);
         a.ty = 85 + Math.random() * (H - 115);
-        a.rest = s ? 0.3 + Math.random() * 1.2 : hen ? 0.4 + Math.random() * 2 : 0.8 + Math.random() * 3;
+        a.rest = hen ? 1.5 + Math.random() * 3 : 2 + Math.random() * 4;
       } else {
         const step = Math.min(d, speed * dt);
         a.x += (dx / d) * step;
@@ -437,7 +439,7 @@ function animate(now) {
         if (Math.abs(dx) > 1) a.dir = dx < 0 ? -1 : 1;
       }
       const walking = a.rest <= 0 && d >= 2;
-      a.bob += dt * (s ? 13 : hen ? 14 : 9);
+      a.bob += dt * (hen ? 10 : 7);
       // pigs bob; chickens hop
       const bob = walking ? (hen ? -Math.abs(Math.sin(a.bob)) * 3 : Math.sin(a.bob) * 1.4) : 0;
       const shake = 0;
@@ -467,8 +469,10 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 
-const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Alert", idle: "○ Quiet", waiting: "○ Waiting" };
-const RANK = { idle: 0, calm: 1, watch: 2, alert: 3 };
+// Alert = 3 of the last 5 calls sound bad (a warning); critical = 4 or 5 of 5. Matches the bot (bot/src/guard.ts severity).
+const CRITICAL_AT = 4;
+const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Warning", critical: "🚨 Critical", idle: "○ Quiet", waiting: "○ Waiting" };
+const RANK = { idle: 0, calm: 1, watch: 2, alert: 3, critical: 4 };
 async function pollPens() {
   const states = {};
   for (const sp of Object.keys(SPECIES)) {
@@ -486,15 +490,15 @@ async function pollPens() {
         if (sp !== "pig") parts.push(el("span", {}, `${SPECIES[sp].emoji} waiting for the ${sp} model`));
         continue;
       }
-      pen.levels[sp] = s.window ? s.level : "idle";
+      pen.levels[sp] = !s.window ? "idle" : s.level === "alert" && s.distressed >= CRITICAL_AT ? "critical" : s.level;
       if (RANK[pen.levels[sp]] > RANK[level]) level = pen.levels[sp];
       if (s.window) parts.push(el("span", {}, `${SPECIES[sp].emoji} `, el("b", { text: `${s.distressed} of last ${s.window}` }), ` sounded ${SPECIES[sp].risk}`));
     }
     if (level === "idle" && !pen.kinds.some((sp) => states[sp])) level = "waiting";
     pen.level = level;
-    pen.badge.className = `badge ${level === "waiting" ? "idle" : level}`;
+    pen.badge.className = `badge ${level === "waiting" ? "idle" : level === "critical" ? "alert critical" : level}`;
     pen.badge.textContent = LEVEL[level];
-    pen.card.className = `pen ${level === "waiting" ? "idle" : level}`;
+    pen.card.className = `pen ${level === "waiting" ? "idle" : level === "critical" ? "alert critical" : level}`;
     const shown = parts.length ? parts.flatMap((p, i) => (i ? [el("br"), p] : [p])) : ["No calls yet."];
     pen.summary.replaceChildren(...shown);
   }
@@ -540,8 +544,10 @@ async function pollAlerts() {
     // The same single message the Photon bot texts (bot/src/commands.ts alertText): the reason is folded in.
     const who = sp === "pig" ? "pigs" : "chickens", bad = sp === "pig" ? "stressed" : "sick";
     const reason = a.explanation.text.trim().split(/(?<=[.!?])\s+/).slice(1).join(" ");
-    const message = `${SPECIES[sp].emoji} Pen ${a.pen_id}: the ${who} sound ${bad} (${Math.round(a.confidence * 100)}% sure). ` +
-      `${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.`;
+    const critical = a.distressed >= CRITICAL_AT;
+    const message = `${critical ? "🚨 Critical" : "⚠️ Warning"} · ${SPECIES[sp].emoji} Pen ${a.pen_id}: the ${who} sound ${bad} ` +
+      `(${Math.round(a.confidence * 100)}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.` +
+      (critical ? " Please check the pen now." : "");
     const li = el("li", { class: "sms" },
       el("time", { text: new Date(a.created_at).toLocaleTimeString() }),
       message,

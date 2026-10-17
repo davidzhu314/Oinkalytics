@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { alertText, handle, type BotState, type Reply, type Source } from "./commands.ts";
+import { alertText, escalationText, escalator, handle, type BotState, type Reply, type Source } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
 import { classify, onceEvery, rateLimiter } from "./guard.ts";
 
@@ -109,6 +109,8 @@ async function send(space: Space, replies: Reply[]) {
   }
 }
 
+const worse = escalator();
+
 const pollers = sources.map((src) =>
   alertPoller({
     oink: src.oink,
@@ -117,6 +119,7 @@ const pollers = sources.map((src) =>
       const space = await resolveFarmerSpace();
       if (!space) throw new Error("no farmer conversation yet");
       await space.send(alertText(src, a));
+      worse.noted(`${src.name}:${a.pen_id}`, a);
       console.log(`[alerts] sent ${src.name} ${a.alert_id}: ${a.message}`);
     },
   }),
@@ -126,8 +129,31 @@ console.log(`[bot] channel=${CHANNEL} api=${API} chicken_api=${CHICKEN_API ?? "o
 await restoreSpace();
 await Promise.all(pollers.map((p) => p.start()));
 
+// A warned pen that gets worse within 10 minutes gets one "critical" follow-up.
+const escalation = setInterval(async () => {
+  for (const src of sources) {
+    let pens;
+    try {
+      pens = await src.oink.pens();
+    } catch {
+      continue;
+    }
+    for (const pen of pens) {
+      if (!worse.shouldEscalate(`${src.name}:${pen.pen_id}`, pen)) continue;
+      if (state.muted) {
+        console.log(`[alerts] muted, not sending: ${src.name} Pen ${pen.pen_id} critical`);
+        continue;
+      }
+      const space = await resolveFarmerSpace();
+      if (space) await space.send(escalationText(src, pen)).catch((err) => console.error("[alerts] escalation failed:", err));
+      console.log(`[alerts] sent ${src.name} Pen ${pen.pen_id} escalation to critical`);
+    }
+  }
+}, 3000);
+
 const shutdown = async () => {
   for (const p of pollers) p.stop();
+  clearInterval(escalation);
   await app.stop();
   process.exit(0);
 };

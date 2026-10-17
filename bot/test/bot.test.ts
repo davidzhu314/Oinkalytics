@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alertText, handle, parse, penOf, type BotState, type Source } from "../src/commands.ts";
+import { alertText, escalationText, escalator, handle, parse, penOf, severity, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
 import { classify, onceEvery, rateLimiter } from "../src/guard.ts";
 import type { Alert, Oink } from "../src/oink.ts";
@@ -230,12 +230,12 @@ test("one alert message: verdict, how sure, the reason, one hint", () => {
   const withReason = { ...alert("a1", "3"), confidence: 0.78,
     explanation: { text: "This call sounds stressed (81% sure). It sounds most like pigs recorded when separated from their group.", source: "llm" as const } };
   assert.equal(alertText(pig, withReason),
-    "🐷 Pen 3: the pigs sound stressed (78% sure). 3 of their last 5 calls sounded stressed, from one animal or several.\n" +
+    "⚠️ Warning · 🐷 Pen 3: the pigs sound stressed (78% sure). 3 of their last 5 calls sounded stressed, from one animal or several.\n" +
     "It sounds most like pigs recorded when separated from their group.\n" +
     'Reply "play it" to hear the call.');
   // a one-sentence explanation has no extra reason: two lines, no repeat of the verdict
   const short = { ...alert("c1", "2"), confidence: 1, explanation: { text: "This recording sounds unhealthy (100% confident).", source: "template" as const } };
-  assert.equal(alertText(hen, short), "🐔 Pen 2: the chickens sound sick (100% sure). 3 of their last 5 calls sounded sick, from one animal or several.\n" +
+  assert.equal(alertText(hen, short), "⚠️ Warning · 🐔 Pen 2: the chickens sound sick (100% sure). 3 of their last 5 calls sounded sick, from one animal or several.\n" +
     'Reply "play it" to hear the call.');
   assert.doesNotMatch(alertText(pig, withReason), /why pig|play pig|Reply "why"/);
 });
@@ -247,4 +247,32 @@ test("replies tag the pen with its animal", async () => {
   ];
   const [why] = await handle("why", sources, { muted: false });
   assert.match((why as { text: string }).text, /^🐷 Pen 3: /);
+});
+
+test("3 of 5 is a warning, 4 or 5 of 5 is critical", () => {
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", match: /pig/, oink: fakeOink() };
+  assert.equal(severity(3), "warning");
+  assert.equal(severity(4), "critical");
+  const five = { ...alert("a5", "3"), distressed: 5, window: 5, confidence: 0.9 };
+  assert.match(alertText(pig, five), /^🚨 Critical · 🐷 Pen 3: .* 5 of their last 5 calls .* Please check the pen now\./);
+});
+
+test("a warned pen that gets worse gets one critical follow-up, within 10 minutes", () => {
+  let now = 0;
+  const w = escalator(600_000, () => now);
+  const pen = (distressed: number) => ({ pen_id: "3", level: (distressed >= 3 ? "alert" : "watch") as "alert" | "watch",
+    window: 5, distressed, last_prediction_id: null, updated_at: null, summary: "" });
+  assert.equal(w.shouldEscalate("Pigs:3", pen(5)), false); // no warning sent yet
+  w.noted("Pigs:3", alert("a1", "3")); // a 3-of-5 warning
+  assert.equal(w.shouldEscalate("Pigs:3", pen(3)), false);
+  assert.equal(w.shouldEscalate("Pigs:3", pen(4)), true);
+  assert.equal(w.shouldEscalate("Pigs:3", pen(5)), false); // only once
+  w.noted("Pigs:3", { ...alert("a2", "3"), distressed: 5 }); // an alert that was already critical
+  assert.equal(w.shouldEscalate("Pigs:3", pen(5)), false);
+  w.noted("Pigs:3", alert("a3", "3"));
+  now = 700_000;
+  assert.equal(w.shouldEscalate("Pigs:3", pen(5)), false); // too long after the warning
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", match: /pig/, oink: fakeOink() };
+  assert.equal(escalationText(pig, pen(4)), "🚨 Critical · 🐷 Pen 3: it's getting worse. 4 of the last 5 calls now sound stressed. " +
+    'Please check the pen now.\nReply "play it" to hear the call.');
 });

@@ -1,6 +1,6 @@
 // Farmer commands. Pure apart from the API calls, so tests can drive it with a fake client.
 
-import type { Alert, Oink } from "./oink.ts";
+import type { Alert, Oink, PenStatus } from "./oink.ts";
 
 export type Reply =
   | { kind: "text"; text: string }
@@ -25,6 +25,12 @@ export function reasonOf(explanation: string): string {
   return parts.slice(1).join(" ");
 }
 
+/** 3 of the last 5 calls sounding bad is the alert threshold (a warning); 4 or 5 of 5 is critical. */
+export const CRITICAL_AT = 4;
+export type Severity = "warning" | "critical";
+export const severity = (distressed: number): Severity => (distressed >= CRITICAL_AT ? "critical" : "warning");
+const TAG: Record<Severity, string> = { warning: "⚠️ Warning", critical: "🚨 Critical" };
+
 /** One alert message: what, how sure, the reason, and one hint. The "why" is folded in, so the farmer
  *  doesn't have to ask (texting "why" still works). The microphone counts calls, not animals. */
 export function alertText(src: Source, a: Alert): string {
@@ -33,8 +39,10 @@ export function alertText(src: Source, a: Alert): string {
   const head = src.emoji ? `${src.emoji} Pen ${a.pen_id}` : `Pen ${a.pen_id}`;
   const sure = Math.round(a.confidence * 100);
   const reason = reasonOf(a.explanation.text);
+  const sev = severity(a.distressed);
   return [
-    `${head}: the ${who} sound ${bad} (${sure}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.`,
+    `${TAG[sev]} · ${head}: the ${who} sound ${bad} (${sure}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, ` +
+      `from one animal or several.${sev === "critical" ? " Please check the pen now." : ""}`,
     reason,
     'Reply "play it" to hear the call.',
   ].filter(Boolean).join("\n");
@@ -157,4 +165,32 @@ export async function handle(text: string, sources: Source[], state: BotState): 
     console.error(`[bot] command ${cmd ?? "?"} failed:`, err);
     return say(UNREACHABLE);
   }
+}
+
+/** Follow-up when a pen that already got a warning gets worse (the server only alerts once per pen per 5 min). */
+export function escalationText(src: Source, pen: PenStatus): string {
+  const bad = src.bad ?? "stressed";
+  const head = src.emoji ? `${src.emoji} Pen ${pen.pen_id}` : `Pen ${pen.pen_id}`;
+  return `${TAG.critical} · ${head}: it's getting worse. ${pen.distressed} of the last ${pen.window} calls now sound ${bad}. ` +
+    `Please check the pen now.\nReply "play it" to hear the call.`;
+}
+
+/** Remembers the alerts we sent, and says when a warned pen has become critical: at most once per alert,
+ *  and only within `forMs` of it. */
+export function escalator(forMs = 10 * 60_000, now: () => number = Date.now) {
+  const sent = new Map<string, { at: number; critical: boolean }>();
+  return {
+    noted(key: string, alert: Alert) {
+      sent.set(key, { at: now(), critical: severity(alert.distressed) === "critical" });
+    },
+    shouldEscalate(key: string, pen: PenStatus): boolean {
+      const s = sent.get(key);
+      if (!s || s.critical || now() - s.at > forMs) return false;
+      if (pen.level === "alert" && pen.distressed >= CRITICAL_AT) {
+        s.critical = true;
+        return true;
+      }
+      return false;
+    },
+  };
 }
