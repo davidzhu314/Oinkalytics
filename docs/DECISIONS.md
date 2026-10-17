@@ -2,6 +2,16 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Photon bot findings (Spectrum SDK)
+
+- **Package is `spectrum-ts`** (v12.11.0), ESM, TypeScript 5+. Providers import from `spectrum-ts/providers/<name>`.
+- **No tunnel for the bot.** Spectrum Cloud streams inbound messages over `app.messages` (an async iterable), so there is nothing to expose. `cloudflared` is only needed if we switch to `app.webhook()`. The "tunnel or Wi-Fi drops" risk no longer applies to the messaging path.
+- **Credentials:** `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` from the Photon dashboard under Settings. Get them at the workshop; the bot runs credential-free in dev until then.
+- **Spectrum's `terminal` provider is off by default.** It spawns a downloaded `tuichat` binary; Windows Application Control blocks it outright, and it is a full-screen TUI that cannot be scripted. `bot/src/stdin-app.ts` replaces it with a Spectrum-shaped app over stdin, which is what `npm run dev` and the tests use. Set `BOT_TERMINAL=1` to opt back in.
+- **Proactive alerts need a stored audience.** An alert has no conversation attached, so the bot persists every chat that texts it to `.subscribers.json` and accepts `ALERT_TO=+1555…` for the demo phone, resolved with `imessage(app).space.create(handle)`.
+- **`ALERT_COOLDOWN_S` is read by the API process, not the bot.** Start uvicorn with it (`ALERT_COOLDOWN_S=30`) or the demo's second alert never fires.
+- **`mute` / `unmute` are implemented** as commands plus a `BOT_MUTE` env default, against the plan's "alert spam during development" risk.
+
 ## Hour 12: Perch results, and the model we ship (ml/perch_eval.py, ml/perch_sweep.py)
 
 Valence on all 6,887 calls with logistic regression on `emb_call`. Balanced accuracy:

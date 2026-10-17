@@ -1,0 +1,22 @@
+{
+  "name": "oinkalytics-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Photon messaging agent for Oinkalytics: pen alerts, why?, status, play it, send-a-clip",
+  "scripts": {
+    "dev": "tsx watch src/dev.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "fire-alert": "tsx scripts/fire-alert.ts"
+  },
+  "dependencies": {
+    "spectrum-ts": "^12.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}
