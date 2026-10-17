@@ -4,6 +4,8 @@ A running log of choices we make during the build. Newest first.
 
 ## Photon bot findings (Spectrum SDK)
 
+- **`SPECTRUM_PROJECT_ID` must be a UUID**, not a `pho_prj_…` or `pho_sk_…` key. Confirmed against the live API: `GET https://spectrum.photon.codes/projects/<id>/` returns `VALIDATION_ERROR` for `pho_prj_<ulid>`, a bare ULID, and `proj_abc123`, but gets past validation (`401 Missing authorization header`) for a UUID. If the dashboard shows several values, the Project ID is the one shaped `8-4-4-4-12` hex with dashes.
+- **A `pho_sk_…` secret embeds its own project ULID** (`pho_sk_<projectULID>_<secret>`), so you can tell whether a key and a project belong together without calling the API.
 - **Package is `spectrum-ts`** (v12.11.0), ESM, TypeScript 5+. Providers import from `spectrum-ts/providers/<name>`.
 - **No tunnel for the bot.** Spectrum Cloud streams inbound messages over `app.messages` (an async iterable), so there is nothing to expose. `cloudflared` is only needed if we switch to `app.webhook()`. The "tunnel or Wi-Fi drops" risk no longer applies to the messaging path.
 - **Credentials:** `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` from the Photon dashboard under Settings. Get them at the workshop; the bot runs credential-free in dev until then.
