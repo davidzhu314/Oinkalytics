@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from ml.embed import SR, embed_waveforms
+from ml.verdict import verdict
 from .routes import build_router
 from .schemas import ContextGuess, Explanation, Features, Health, Prediction, SimilarCall, Valence
 from .state import Store, new_id, now
@@ -126,21 +127,9 @@ def real_predict(data: bytes, filename: str, pen_id=None, hint=None) -> Predicti
     r = embed_waveforms([y])
     e = r["emb_call"]
 
-    p = float(1 / (1 + np.exp(-M["valence"].decision_function(e)[0] / M["temperature"])))
-    pig_p = float(M["pig"].predict_proba(e)[0, 1])
-    u = e[0] / np.linalg.norm(e[0])
-    sims = M["index"]["emb"] @ u
-    best = float(sims.max())
-
-    abstain = None
-    if pig_p < 0.5 or best < M["ood_sim"]:
-        status, abstain = "unsure", "not_pig"
-    elif p >= M["alarm_at"]:
-        status = "distressed"
-    elif p < M["calm_below"]:
-        status = "calm"
-    else:
-        status, abstain = "unsure", "low_confidence"
+    v = verdict(e, M)
+    p, sims = float(v["p"][0]), v["sims"][0]
+    status, abstain = str(v["status"][0]), v["abstain"][0]
 
     ctx_p = M["context"].predict_proba(e)[0]
     top = np.argsort(ctx_p)[::-1][:3]

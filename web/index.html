@@ -107,6 +107,20 @@
       </div>
       <p class="sub small">Balanced accuracy, where guessing scores 50%. Data: SoundWel (Briefer et al. 2022, CC BY 4.0). Model: Perch 2.0 embeddings + calibrated logistic regression. Not yet tested in a noisy real barn.</p>
 
+      <h3 class="subhead">Then we added farm noise</h3>
+      <p class="sub">Will it work on a real farm? We mixed every held-out pig call with background noise recorded on a working poultry farm, louder and louder, and ran each mix through the whole system, including the "not a pig" check.</p>
+      <div class="stats">
+        <div class="stat"><b>87%</b><span>no noise (calls it answers)</span></div>
+        <div class="stat"><b>87%</b><span>light noise, 20 dB below the call</span></div>
+        <div class="stat hl"><b>76%</b><span>moderate noise, 10 dB below</span></div>
+        <div class="stat"><b>63%</b><span>noise louder than the call (−5 dB)</span></div>
+      </div>
+      <div class="charts" style="grid-template-columns: minmax(0, 1fr); max-width: 980px;">
+        <figure><img src="slides/6_noise.png" alt="As farm noise rises from none to -5 dB, accuracy on the calls it answers falls from 87% to 63%, while the share it says not sure stays near 50%."></figure>
+      </div>
+      <p class="sub">What we learned: light noise changes nothing. Heavier noise costs accuracy, but the model doesn't notice. It says "not sure" about as often as before, and false alarms on calm calls double (13% to 26%). That's the weakness to fix next: train with farm noise mixed in, recalibrate, then test in a real barn.</p>
+      <p class="sub small">226 held-out calls. Noise: Bowen University "Poultry Vocalization Signal Dataset for Early Disease Detection" (Mendeley, CC BY 4.0), recorded on a poultry farm in Nigeria, not a pig barn. Added noise only, not barn echo or distance.</p>
+
       <h3 class="subhead">Then we tried chickens, and caught the model cheating</h3>
       <p class="sub">Same pipeline, a second species: healthy vs sick chickens. It scored 99.6% on recordings it had never heard. We didn't believe it, so we checked what else could explain it.</p>
       <div class="stats">

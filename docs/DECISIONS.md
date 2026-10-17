@@ -2,6 +2,23 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 20: farm-noise robustness (ml/noise_test.py → docs/slides/6_noise.png, data/noise_results.csv)
+
+All 226 demo hold-out calls mixed with poultry-farm noise (the 86 `noise` recordings of the Bowen University chicken dataset, Mendeley doi:10.17632/zp4nf2dxbh.1, CC BY 4.0; recorded in Nigeria, **not a pig barn**). One random noise segment per call, reused at every level, scaled to an SNR relative to the call's RMS. Embedded exactly as the server embeds uploads, judged by the shipped rule, now shared as `ml/verdict.py` (the server uses the same function; the clean run reproduces the logged 48% answered / 0.871).
+
+| Noise | Answered | Not a pig | Balanced acc on answered [95% CI] | Overall (unsure = miss) | Calm → distressed |
+|---|---|---|---|---|---|
+| none | 48% | 0% | **0.871** [0.81–0.93] | 0.415 | 13% |
+| 20 dB | 46% | 0% | **0.873** [0.81–0.93] | 0.400 | 11% |
+| 10 dB | 48% | 3% | **0.757** [0.68–0.83] | 0.370 | 13% |
+| 5 dB | 54% | 5% | **0.711** [0.63–0.79] | 0.383 | 16% |
+| 0 dB | 50% | 15% | **0.685** [0.60–0.77] | 0.346 | 20% |
+| −5 dB | 50% | 26% | **0.629** [0.54–0.72] | 0.310 | 26% |
+
+- **Light noise (20 dB) changes nothing.** From 10 dB on, accuracy on answered calls drops (0.87 → 0.63) and false alarms on calm calls double.
+- **It does not fail safely.** The share it answers stays ~50% at every level: the "not a pig" check rejects more as noise rises (0 → 26%), but "low confidence" abstentions *fall* (52% → 25%). Noise pushes the classifier to confident answers. The calibration was fitted on clean recordings and doesn't hold under this shift.
+- Say it this way: "Robust to light farm noise; under heavy noise it gets less accurate without getting more cautious. That's our next fix (noise-augmented training and recalibration), then a real-barn test." Don't call it barn-tested: added noise only, no echo, distance or overlapping pigs.
+
 ## Hour 18: per-pen reset (additive API change)
 
 - New endpoint **`POST /pens/{pen_id}/reset`** (`api/routes.py`) backed by **`Store.reset_pen()`** (`api/state.py`): clears that pen's recent calls and alert cooldown; alerts already sent stay listed. Nothing existing changed, so the contract still holds; the chicken server inherits it. The hub calls it when a pen's microphone mode changes, so switching a warned pen to Calm clears its warning.
