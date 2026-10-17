@@ -33,29 +33,26 @@ NOT_PIG = {**DISTRESSED, "status": "unsure", "abstain_reason": "not_pig", "p_dis
 class Base(unittest.TestCase):
     def setUp(self):
         ex._cache.clear()
-        patches = [mock.patch.object(ex, "load_typical", return_value=TYPICAL),
-                   mock.patch.dict(os.environ, {"EXPLAIN_LLM": "1", "OPENROUTER_API_KEY": "test"})]
+        patches = [mock.patch.dict(os.environ, {"EXPLAIN_LLM": "1", "OPENROUTER_API_KEY": "test"})]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
 
 
 class TemplateTests(Base):
-    def test_distressed_cites_only_informative_comparisons(self):
+    def test_distressed_is_plain_farmer_language(self):
         t = ex.template(ex.prepare(DISTRESSED))
-        self.assertEqual(t, "This call sounds distressed (86% confident). It lasted 0.92 s "
-                            "(typical distressed call: 0.33 s). It sounds most like a distressed call "
-                            "recorded during Restrain.")
-        self.assertNotIn("pitch", t)  # 69 vs 70 Hz isn't a real difference
+        self.assertEqual(t, "Sounds stressed (86% sure). It sounds most like pigs recorded while being held still.")
+        for jargon in ("confident", "typical", "0.92", "Hz", "Restrain"):
+            self.assertNotIn(jargon, t)
 
     def test_calm(self):
         t = ex.template(ex.prepare(CALM))
-        self.assertIn("calm (88% confident)", t)
-        self.assertIn("Enriched", t)
+        self.assertEqual(t, "Sounds calm (88% sure). It sounds most like pigs recorded in a pen with toys and straw.")
 
     def test_unsure_low_confidence(self):
         t = ex.template(ex.prepare(UNSURE))
-        self.assertTrue(t.startswith("I'm not confident either way about this call (chance of distress 52%)."))
+        self.assertEqual(t, "I'm not sure yet whether this call sounds calm or stressed.")
 
     def test_not_pig_is_the_fixed_line(self):
         self.assertEqual(ex.template(ex.prepare(NOT_PIG)), "I'm not sure this is a pig call.")
@@ -71,10 +68,17 @@ class CheckTests(Base):
         super().setUp()
         self.e = ex.prepare(DISTRESSED)
 
-    def test_accepts_rounding_and_percentages(self):
-        ok = ("This call sounds distressed, with 86% confidence. It lasted about 0.9 s, much longer than "
-              "the typical 0.33 s, and sounds like calls recorded during restrain.")
-        self.assertIsNone(ex.check(ok, self.e))
+    def test_accepts_plain_messages(self):
+        for ok in ("Sounds stressed (86% sure). It sounds most like pigs recorded while being held still.",
+                   "This pig sounds stressed (86% sure): 2 of 2 of the closest calls sound the same.",
+                   "Sounds stressed, 86% sure. It sounds like calls recorded during restrain."):
+            self.assertIsNone(ex.check(ok, self.e), ok)
+
+    def test_rejects_measurements_now_left_out(self):
+        self.assertIn("number", ex.check("Sounds stressed (86% sure). It lasted 0.92 s.", self.e))
+
+    def test_rejects_plain_words_situation_not_in_evidence(self):
+        self.assertIn("Fighting", ex.check("Sounds stressed (86% sure), like pigs recorded during a fight.", self.e))
 
     def test_rejects_invented_number(self):
         self.assertIn("number", ex.check("This call sounds distressed (86% confident) at 95 dB.", self.e))
@@ -89,11 +93,12 @@ class CheckTests(Base):
 
     def test_rejects_long_output(self):
         self.assertEqual(ex.check("One. Two. Three. Four.", self.e), "too long")
+        self.assertEqual(ex.check("Sounds stressed " + "and very " * 20 + "loud.", self.e), "too long")
 
 
 class ExplainTests(Base):
     def test_clean_llm_output_is_used(self):
-        text = "This call sounds distressed (86% confident). It lasted 0.92 s and sounds like calls recorded during Restrain."
+        text = "Sounds stressed (86% sure). It sounds most like pigs recorded while being held still."
         with mock.patch.object(ex, "_llm", return_value=text) as llm:
             self.assertEqual(ex.explain(DISTRESSED), {"text": text, "source": "llm"})
             ex.explain(DISTRESSED)  # cached

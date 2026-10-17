@@ -422,14 +422,14 @@ function animate(now) {
     for (const a of pen.animals) {
       const s = a.mood === "distressed";
       const hen = a.kind === "chicken";
-      const speed = (s ? (hen ? 95 : 75) : (hen ? 28 : 20)) * (a.entering ? 2.5 : 1);
+      const speed = (s ? (hen ? 45 : 38) : (hen ? 28 : 20)) * (a.entering ? 2.5 : 1);
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
       if (a.entering && d < 2) a.entering = false;
       if (a.rest > 0) a.rest -= dt;
       else if (d < 2) {
         a.tx = 45 + Math.random() * (W - 90);
         a.ty = 85 + Math.random() * (H - 115);
-        a.rest = s ? Math.random() * 0.3 : hen ? 0.4 + Math.random() * 2 : 0.8 + Math.random() * 3;
+        a.rest = s ? 0.3 + Math.random() * 1.2 : hen ? 0.4 + Math.random() * 2 : 0.8 + Math.random() * 3;
       } else {
         const step = Math.min(d, speed * dt);
         a.x += (dx / d) * step;
@@ -437,10 +437,10 @@ function animate(now) {
         if (Math.abs(dx) > 1) a.dir = dx < 0 ? -1 : 1;
       }
       const walking = a.rest <= 0 && d >= 2;
-      a.bob += dt * (s ? 22 : hen ? 14 : 9);
+      a.bob += dt * (s ? 13 : hen ? 14 : 9);
       // pigs bob; chickens hop
       const bob = walking ? (hen ? -Math.abs(Math.sin(a.bob)) * 3 : Math.sin(a.bob) * 1.4) : 0;
-      const shake = s ? Math.sin(now / 35 + a.x) * 1.2 : 0;
+      const shake = 0;
       a.g.setAttribute("transform", `translate(${(a.x + shake).toFixed(1)},${(a.y + bob).toFixed(1)})`);
       a.flip.setAttribute("transform", `scale(${a.dir},1)`);
       if (hen) {
@@ -451,7 +451,7 @@ function animate(now) {
       }
       a.g.classList.toggle("walking", walking);
       a.g.classList.toggle("stressed", s);
-      a.emote.textContent = s && Math.sin(now / 300 + a.x) > 0.2 ? "!" : "";
+      a.emote.textContent = s ? "!" : ""; // steady, not blinking
     }
   }
   // keep animals drawn in depth order

@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { handle, type BotState, type Reply, type Source } from "./commands.ts";
+import { alertText, handle, type BotState, type Reply, type Source } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
 import { classify, onceEvery, rateLimiter } from "./guard.ts";
 
@@ -17,8 +17,9 @@ const FARMER = process.env.FARMER_PHONE;
 const ALLOWED = (process.env.ALLOWED_SENDERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const state: BotState = { muted: ["1", "true", "yes"].includes((process.env.BOT_MUTE ?? "").toLowerCase()) };
 
-const sources: Source[] = [{ name: "Pigs", match: /\b(pigs?|barn|sows?|hogs?)\b/, oink: oinkClient(API) }];
-if (CHICKEN_API) sources.push({ name: "Chickens", match: /\b(chickens?|hens?|coop|birds?|poultry)\b/, oink: oinkClient(CHICKEN_API) });
+const sources: Source[] = [{ name: "Pigs", emoji: "🐷", bad: "stressed", match: /\b(pigs?|barn|sows?|hogs?)\b/, oink: oinkClient(API) }];
+if (CHICKEN_API)
+  sources.push({ name: "Chickens", emoji: "🐔", bad: "sick", match: /\b(chickens?|hens?|coop|birds?|poultry)\b/, oink: oinkClient(CHICKEN_API) });
 
 async function loadProviders() {
   if (CHANNEL === "imessage") {
@@ -115,10 +116,7 @@ const pollers = sources.map((src) =>
     async deliver(a: Alert) {
       const space = await resolveFarmerSpace();
       if (!space) throw new Error("no farmer conversation yet");
-      const tag = sources.length > 1 ? `${src.name}, ` : "";
-      const one = src.name.toLowerCase().replace(/s$/, "");
-      const hint = sources.length > 1 ? `"why ${one}" or "play ${one}"` : '"why" or "play it"';
-      await space.send(`${tag}${a.message}\nReply ${hint}.`);
+      await space.send(alertText(src, a));
       console.log(`[alerts] sent ${src.name} ${a.alert_id}: ${a.message}`);
     },
   }),

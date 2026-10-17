@@ -19,16 +19,11 @@ import time
 import httpx
 from dotenv import load_dotenv
 
-from ml.evidence import load_typical
 
 load_dotenv()
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 TIMEOUT_S = float(os.environ.get("EXPLAIN_TIMEOUT_S", "8"))
-# A "typical" comparison is only cited when calm and distressed medians differ by at least this much.
-INFORMATIVE = 0.15
-# Features worth comparing to typical values. AM rate is too noisy on short calls to cite.
-COMPARABLE = {"duration_s": ("lasted", "s"), "f0_mean_hz": ("had a mean pitch of", "Hz")}
 
 # SoundWel's 17 recording contexts. Naming one that isn't in the evidence is a new claim.
 CONTEXTS = [
@@ -36,6 +31,19 @@ CONTEXTS = [
     "Isolation", "MissedNursing", "NegativeConditioning", "NovelObject", "PositiveConditioning", "Restrain",
     "Reunion", "Run", "Surprise",
 ]
+
+
+# How each recording situation reads to a farmer ("It sounds most like pigs recorded ...").
+PLAIN = {
+    "AfterNursing": "just after nursing", "Barren": "in a bare pen", "BeforeNursing": "just before nursing",
+    "Castration": "during castration", "Crushing": "when being lain on by the sow", "Enriched": "in a pen with toys and straw",
+    "Fighting": "during a fight", "Huddling": "while huddling together", "Isolation": "when separated from their group",
+    "MissedNursing": "after missing a feed", "NegativeConditioning": "while waiting for something unpleasant",
+    "NovelObject": "near something new", "PositiveConditioning": "while waiting for a treat", "Restrain": "while being held still",
+    "Reunion": "when reunited with their group", "Run": "while running", "Surprise": "when startled",
+}
+WORD = {"calm": "calm", "distressed": "stressed"}
+MAX_WORDS = 40
 
 
 def _context_re(name: str) -> re.Pattern:
@@ -51,16 +59,19 @@ BANNED = re.compile(
     re.I,
 )
 
-SYSTEM = """You explain one pig-call prediction to a farmer in plain English.
+SYSTEM = """You write one short text message to a pig farmer about one call from their barn.
 
 Rules:
-- Use ONLY the facts in the JSON. Never add numbers, causes, health claims or advice that are not in it.
-- Exactly 2 short sentences. No lists, no headings, no quotes.
-- Sentence 1: the verdict and its confidence (use "confidence" as a percentage).
-- Sentence 2: the evidence: the measured values that have a typical value to compare with, and/or the closest similar call and the situation it was recorded in.
-- Describe sounds, not feelings. Say "sounds like calls recorded during isolation", never "the pig is scared", "in pain", "wants", "feels" or "means".
-- Round numbers the way the JSON gives them; don't compute new ones.
-- If status is "unsure", say it is not confident either way and why, using only the JSON."""
+- Use ONLY the facts in the JSON. Never add numbers, causes, health claims, diagnoses or advice.
+- At most 2 short sentences and 30 words in total. Everyday words a farmer uses; no jargon (never say
+  "confidence", "records", "typical", "data", "model", "valence" or "similarity").
+- The only number you may write is how sure it is, as "(72% sure)", from "sure_pct".
+- Sentence 1: whether it sounds calm or stressed ("word"), and how sure.
+- Sentence 2 (optional): one reason. Use "situation" exactly as written (e.g. "It sounds most like pigs recorded
+  when separated from their group"), and/or "matches_agree" (e.g. "all 3 of the closest recorded calls sound
+  stressed too").
+- Describe sounds, not feelings: "sounds stressed", never "the pig is scared", "in pain", "wants" or "feels".
+- If status is "unsure": one sentence saying you are not sure yet whether it sounds calm or stressed."""
 
 _cache: dict[str, dict] = {}
 
@@ -71,49 +82,44 @@ def _confidence(ev: dict) -> float:
 
 
 def prepare(ev: dict) -> dict:
-    """The evidence actually used: own-method typical values when built, only informative comparisons."""
-    typical = load_typical() or ev.get("typical") or {}
-    keep = {}
-    for k in COMPARABLE:
-        c, d = typical.get("calm", {}).get(k), typical.get("distressed", {}).get(k)
-        if c and d and abs(c - d) / ((c + d) / 2) >= INFORMATIVE:
-            keep[k] = {"calm": c, "distressed": d}
-    f = ev["features"]
-    measured = {k: f.get(k) for k in COMPARABLE if f.get(k) is not None}
+    """The evidence the farmer's message may use: verdict, how sure, and the closest matches' situation in plain
+    words. Measured values stay out: in pigs only call length separates calm from distressed, and a farmer can't
+    act on "0.31 s vs 0.33 s"."""
+    similar = [{"status": s["status"], "context": s["context"]} for s in ev.get("similar_calls", [])[:3]]
+    status = ev["status"]
+    # The situation of the closest match that sounds like the verdict (else the closest one), in plain words.
+    same = [c for c in similar if c["status"] == status] or similar
+    situation = PLAIN.get(same[0]["context"]) if same else None
+    conf = _confidence(ev)
     return {
-        "status": ev["status"],
+        "status": status,
         "abstain_reason": ev.get("abstain_reason"),
-        "p_distressed": round(ev["p_distressed"], 2),
-        "confidence": _confidence(ev),
-        "measured": {k: round(v, 2) if k == "duration_s" else round(v) for k, v in measured.items()},
-        "typical": keep,
-        "similar_calls": [
-            {"status": s["status"], "context": s["context"], "similarity": round(s["similarity"], 2)}
-            for s in ev.get("similar_calls", [])[:3]
-        ],
+        "word": WORD.get(status),
+        "confidence": conf,
+        "sure_pct": round(conf * 100),
+        "situation": situation,
+        "matches_agree": _agree(similar, status),
+        "matches_same": sum(c["status"] == status for c in similar),
+        "similar_calls": similar,
     }
+
+
+def _agree(similar: list[dict], status: str) -> str | None:
+    """'all 3' / '2 of 3' of the closest recorded calls sound like the verdict."""
+    if not similar or status == "unsure":
+        return None
+    n = sum(c["status"] == status for c in similar)
+    return f"all {n}" if n == len(similar) and n > 1 else f"{n} of {len(similar)}"
 
 
 def template(e: dict) -> str:
     if e["status"] == "unsure":
         if e.get("abstain_reason") == "not_pig":
             return "I'm not sure this is a pig call."
-        text = f"I'm not confident either way about this call (chance of distress {e['p_distressed']:.0%})."
-        if e["similar_calls"]:
-            s = e["similar_calls"][0]
-            text += f" Its closest match is a {s['status']} call recorded during {s['context']}."
-        return text
-    text = f"This call sounds {e['status']} ({e['confidence']:.0%} confident)."
-    parts = []
-    for k, t in e["typical"].items():
-        if k in e["measured"]:
-            verb, unit = COMPARABLE[k]
-            parts.append(f"{verb} {e['measured'][k]:g} {unit} (typical {e['status']} call: {t[e['status']]:g} {unit})")
-    if parts:
-        text += " It " + " and ".join(parts) + "."
-    if e["similar_calls"]:
-        s = e["similar_calls"][0]
-        text += f" It sounds most like a {s['status']} call recorded during {s['context']}."
+        return "I'm not sure yet whether this call sounds calm or stressed."
+    text = f"Sounds {e['word']} ({e['sure_pct']}% sure)."
+    if e["situation"]:
+        text += f" It sounds most like pigs recorded {e['situation']}."
     return text
 
 
@@ -140,12 +146,13 @@ def check(text: str, e: dict) -> str | None:
         if not any(abs(n - a) <= tol for a in allowed):
             return f"number {m.group(0)} not in evidence"
     known = {s["context"] for s in e["similar_calls"]}
-    stray = [c for c in CONTEXTS if c not in known and _context_re(c).search(text)]
+    low = text.lower()
+    stray = [c for c in CONTEXTS if c not in known and (_context_re(c).search(text) or PLAIN[c].lower() in low)]
     if stray:
         return f"situation {stray[0]} not in evidence"
     if (w := BANNED.search(text)):
         return f"anthropomorphising word '{w.group(0)}'"
-    if len(re.findall(r"[.!?](\s|$)", text.strip())) > 3:
+    if len(re.findall(r"[.!?](\s|$)", text.strip())) > 3 or len(text.split()) > MAX_WORDS:
         return "too long"
     return None
 
@@ -161,12 +168,15 @@ def _llm(e: dict) -> str:
             "model": os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-5.5"),
             "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(e)}],
             "temperature": 0,
-            "max_tokens": 160,
+            "max_tokens": 800,  # the model reasons first (~150-400 tokens); its thinking counts against this limit
         },
         timeout=TIMEOUT_S,
     )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    text = r.json()["choices"][0]["message"].get("content")
+    if not text:
+        raise RuntimeError("empty reply")
+    return text.strip()
 
 
 def explain(evidence: dict) -> dict:

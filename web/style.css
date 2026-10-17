@@ -102,8 +102,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
   transition: border-color .3s, box-shadow .3s;
 }
 .pen.watch { border-color: var(--watch); }
-.pen.alert { border-color: var(--alert); box-shadow: 0 0 0 6px rgba(200, 67, 58, .14), var(--shadow); animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 50% { box-shadow: 0 0 0 12px rgba(200, 67, 58, .05), var(--shadow); } }
+.pen.alert { border-color: var(--alert); box-shadow: 0 0 0 4px rgba(200, 67, 58, .10), var(--shadow); }
 .pen.dragover { border-color: var(--pig-dark); border-style: dashed; }
 .pen-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; }
 .pen-name { font-weight: 800; font-size: 18px; }
@@ -164,8 +163,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .pig.walking .leg-a { animation: legA .35s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: top center; }
 .pig.walking .leg-b { animation: legA .35s ease-in-out infinite alternate-reverse; transform-box: fill-box; transform-origin: top center; }
 @keyframes legA { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
-.pig.stressed .body { fill: #f08a8a; }
-.pig.stressed .dark { fill: #d4646a; }
+.pig.stressed .body { fill: #f29a9f; }
+.pig.stressed .dark { fill: #dc7380; }
 .chicken .feather { fill: var(--hen); stroke: var(--hen-line); stroke-width: 1; }
 .chicken .wing { fill: var(--hen-wing); }
 .chicken .comb { fill: var(--comb); }
@@ -174,13 +173,13 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .chicken .cleg { fill: none; stroke: var(--beak); stroke-width: 2.2; stroke-linecap: round; }
 .chicken.walking .leg-a { animation: legA .22s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: top center; }
 .chicken.walking .leg-b { animation: legA .22s ease-in-out infinite alternate-reverse; transform-box: fill-box; transform-origin: top center; }
-.chicken.stressed .wing { animation: flap .12s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 30% 20%; }
-.chicken.stressed .feather { fill: #f6dcd6; }
-@keyframes flap { from { transform: rotate(0deg); } to { transform: rotate(-38deg); } }
+.chicken.stressed .wing { animation: flap .5s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 30% 20%; }
+.chicken.stressed .feather { fill: #f9e7e2; }
+@keyframes flap { from { transform: rotate(0deg); } to { transform: rotate(-16deg); } }
 .ripple.chicken { stroke: var(--beak); }
 .field .pig, .field .chicken { cursor: pointer; outline: none; }
 .field .pig:hover, .field .chicken:hover, .field .pig:focus-visible, .field .chicken:focus-visible { filter: drop-shadow(0 0 4px rgba(255, 255, 255, .95)) drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); }
-.emote { font: 800 18px system-ui, sans-serif; text-anchor: middle; }
+.emote { font: 800 14px system-ui, sans-serif; text-anchor: middle; opacity: .8; }
 .bubble rect { fill: var(--surface); stroke: var(--line); }
 .bubble text { font: 750 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }
 .ripple { fill: none; stroke: var(--pig-dark); stroke-width: 2.5; }

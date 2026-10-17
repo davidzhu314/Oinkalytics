@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handle, parse, penOf, type BotState, type Source } from "../src/commands.ts";
+import { alertText, handle, parse, penOf, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
 import { classify, onceEvery, rateLimiter } from "../src/guard.ts";
 import type { Alert, Oink } from "../src/oink.ts";
@@ -222,4 +222,23 @@ test("rate limit caps replies per conversation, and the media notice is sent at 
   assert.equal(notice("chat"), false);
   now += 61_000;
   assert.equal(notice("chat"), true);
+});
+
+test("alerts are plain words, count calls not animals, and give one simple hint", () => {
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", match: /pig/, oink: fakeOink() };
+  const hen: Source = { name: "Chickens", emoji: "🐔", bad: "sick", match: /chicken/, oink: fakeOink() };
+  assert.equal(alertText(pig, alert("a1", "3")),
+    "🐷 Pen 3: the pigs sound stressed. 3 of their last 5 calls sounded stressed, from one animal or several, " +
+    "so it's worth a look.\nReply \"why\" or \"play it\".");
+  assert.match(alertText(hen, alert("c1", "2")), /^🐔 Pen 2: the chickens sound sick\. 3 of their last 5 calls sounded sick/);
+  assert.doesNotMatch(alertText(pig, alert("a1")), /why pig|play pig|confidence/);
+});
+
+test("replies tag the pen with its animal", async () => {
+  const sources: Source[] = [
+    { name: "Pigs", emoji: "🐷", match: /\bpigs?\b/, oink: fakeOink([alert("p1", "3")]) },
+    { name: "Chickens", emoji: "🐔", match: /\bchickens?\b/, oink: fakeOink([]) },
+  ];
+  const [why] = await handle("why", sources, { muted: false });
+  assert.match((why as { text: string }).text, /^🐷 Pen 3: /);
 });

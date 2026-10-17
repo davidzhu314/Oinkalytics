@@ -9,7 +9,25 @@ export type Reply =
 export type BotState = { muted: boolean };
 
 /** One monitored species: its API and how to name it ("Pigs", "Chickens"). The first is the main one. */
-export type Source = { name: string; match: RegExp; oink: Oink };
+export type Source = {
+  name: string;
+  match: RegExp;
+  oink: Oink;
+  /** Shown in front of pens ("🐷 Pen 3"); falls back to the name. */
+  emoji?: string;
+  /** How a bad pen sounds, for alerts: "stressed" for pigs, "sick" for chickens. */
+  bad?: string;
+};
+
+/** The alert text a farmer reads, built from the alert's numbers (plain words, one hint). */
+export function alertText(src: Source, a: Alert): string {
+  const who = src.name.toLowerCase();
+  const bad = src.bad ?? "stressed";
+  const head = src.emoji ? `${src.emoji} Pen ${a.pen_id}` : `Pen ${a.pen_id}`;
+  // The microphone counts calls, not animals: say so, so nobody reads "3 calls" as "3 animals".
+  return `${head}: the ${who} sound ${bad}. ${a.distressed} of their last ${a.window} calls sounded ${bad}, ` +
+    `from one animal or several, so it's worth a look.\nReply "why" or "play it".`;
+}
 
 const HELP =
   "I watch the barn microphones and text you when a pen sounds distressed.\n" +
@@ -77,7 +95,7 @@ export async function handle(text: string, sources: Source[], state: BotState): 
   const cmd = parse(text);
   const say = (t: string): Reply[] => [{ kind: "text", text: t }];
   const many = sources.length > 1;
-  const label = (src: Source, pen: string) => (many ? `${src.name}, Pen ${pen}` : `Pen ${pen}`);
+  const label = (src: Source, pen: string) => (src.emoji ? `${src.emoji} Pen ${pen}` : many ? `${src.name}, Pen ${pen}` : `Pen ${pen}`);
   try {
     switch (cmd) {
       case "status": {
