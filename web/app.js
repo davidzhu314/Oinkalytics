@@ -264,7 +264,7 @@ function buildPen(id) {
   // Compact round icon buttons with a hover/focus tooltip (data-tip); the label is also the aria-label.
   const icon = (glyph, tip, cls = "", tag = "button") => el(tag, { class: `ic ${cls}`, "data-tip": tip, "aria-label": tip, text: glyph });
   const addBtns = kinds.map((k) => {
-    const b = icon(k === "pig" ? "＋🐷" : "＋🐔", `Walk a new ${k === "pig" ? "pig" : "hen"} in`, "add");
+    const b = icon(k === "pig" ? "＋ 🐷 Pig" : "＋ 🐔 Hen", `Walk a new ${k === "pig" ? "pig" : "hen"} into this pen`, `add ${k}`);
     b.dataset.kind = k;
     b.onclick = () => addAnimal(pen, k, true);
     return b;
@@ -280,10 +280,11 @@ function buildPen(id) {
     distressed: el("button", { "aria-pressed": "false", title: "Only stressed calls", text: "Stressed" }),
     mine: mineBtn,
   };
-  const listen = icon("🔊", "Listen: play calls out loud", "toggle");
+  // Only shown while the barn is running: it un-mutes this pen's automatic stream of calls.
+  const listen = icon("🔊", "Hear this pen while the barn runs", "toggle");
   listen.setAttribute("aria-pressed", "false");
   const fileIn = el("input", { type: "file", accept: "audio/*,video/*,.m4a,.mp4,.mov,.caf", multiple: true, hidden: true });
-  const clips = icon("📎", "Add your own recordings", "", "label");
+  const clips = icon("📎", "Add your own recordings", "edge", "label");
   clips.append(fileIn);
   const card = el("article", { class: "pen calm" },
     el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, `Pen ${id}`, el("small", { text: `${PEN_NAMES[id] || ""} · ${who}` })), badge),
@@ -292,13 +293,7 @@ function buildPen(id) {
       summary,
       el("div", { class: "pen-tools" },
         el("div", { class: "seg", role: "group", "aria-label": "What this pen's microphone hears" }, Object.values(modes)),
-        el("div", { class: "tools" },
-          icon("▶", "Play the next call", "play"),
-          listen,
-          el("span", { class: "tools-sep", "aria-hidden": "true" }),
-          addBtns,
-          clips))));
-  card.querySelector(".ic.play").onclick = () => feedPen(pen, true);
+        el("div", { class: "tools" }, addBtns, clips, listen))));
 
   const pen = { id, kinds, card, svg, layer, animals, addBtns, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
     listen: false, level: "idle", levels: {}, last: {}, order: {} };
@@ -500,6 +495,7 @@ async function barnLoop() {
 }
 function setRunning(on) {
   running = on;
+  document.body.classList.toggle("barn-running", on); // shows each pen's 🔊 Listen toggle
   $("#barnToggle").textContent = on ? "■ Stop the barn" : "▶ Start the barn";
   if (on) barnLoop();
 }

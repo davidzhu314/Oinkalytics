@@ -122,7 +122,6 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .pen-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .pen-tools .seg button { font-size: 12.5px; padding: 4px 10px; }
 .tools { display: flex; align-items: center; gap: 6px; }
-.tools-sep { width: 1px; height: 20px; background: var(--line); margin: 0 2px; }
 .ic { position: relative; display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; font-weight: 700;
   cursor: pointer; transition: transform .12s, box-shadow .15s, background .15s; }
@@ -131,12 +130,23 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .ic:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .ic[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .ic:disabled { opacity: .4; cursor: default; transform: none; box-shadow: none; }
+.ic.add { padding: 0 13px; font-size: 13.5px; gap: 4px; }
+.ic.add.pig { background: #fde4ea; border-color: #f2a3b3; color: #7a3344; }
+.ic.add.pig:hover { background: #fbd3dd; }
+.ic.add.chicken { background: #fff3cf; border-color: #e8c46a; color: #6b4e00; }
+.ic.add.chicken:hover { background: #ffeab0; }
+.ic.toggle { display: none; }
+.barn-running .ic.toggle { display: inline-grid; animation: pop-in .25s ease-out; }
+@keyframes pop-in { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: none; } }
 .ic.add[data-n]::after { content: attr(data-n); position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px;
   border-radius: 999px; background: var(--ink-2); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
 .ic[data-tip]::before { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translate(-50%, 4px);
   white-space: nowrap; background: var(--ink); color: #fff; font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 8px;
   opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 5; }
 .ic[data-tip]:hover::before, .ic[data-tip]:focus-visible::before { opacity: 1; transform: translate(-50%, 0); }
+/* The last button sits at the card's right edge: anchor its tooltip there so it isn't clipped. */
+.tools .ic:last-child::before, .tools .ic.edge::before { left: auto; right: 0; transform: translate(0, 4px); }
+.tools .ic:last-child:hover::before, .tools .ic:last-child:focus-visible::before, .tools .ic.edge:hover::before, .tools .ic.edge:focus-visible::before { transform: translate(0, 0); }
 .pen-summary { font-size: 14px; color: var(--ink-2); min-height: 21px; }
 .pen-summary b { color: var(--ink); }
 .seg { display: inline-flex; background: #f1ebdc; border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; }
