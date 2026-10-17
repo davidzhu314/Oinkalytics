@@ -2,6 +2,19 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 12–13: slide charts and "same pig, two moods"
+
+**Slide charts** (`python -m ml.slide_charts` → `docs/slides/`, numbers in `docs/slides/numbers.csv`). All come from one run of the shipped model (C=0.001), so these are the numbers to quote:
+- `1_gap.png`: random split **90%**, recordings it never heard **67%** (0.675), labs it never heard **61%** (0.613; earlier 0.58 was at C=0.1).
+- `2_calibration.png`: calibration error 0.030 on recordings it never heard. "80% sure" ≈ right 80% of the time.
+- `3_confidence.png`: answering every call **67%**; the shipped band says "not sure" on 40% and scores **76%** on the rest. 20% of calm calls are wrongly flagged.
+- An earlier note said "≥0.8 confidence covers 58% of calls". That was before temperature scaling; after calibration ≥0.8 covers ~30%. Use the chart numbers.
+
+**Same pig, two moods** (`python -m ml.same_pig`, ungulate dataset, 30 pigs with IDs):
+- **76% of these pig calls are near-identical (cosine ≥ 0.99) to SoundWel training calls**, confirming they're the same ETHZ recordings. They **can't** be used to test the shipped model.
+- **Within this one study: leave-pig-out 86.0% vs random split 86.3%.** No gap. On pigs it has never heard, from the same lab and setup, the model separates the two moods 86% of the time, and that isn't from recognising individual pigs. **The drop to 67% on SoundWel comes from differences between recordings and labs, not between pigs.** That's the case for a real-barn test as the next step. Caveat: one lab, only two contexts (short isolation vs pair with food and toys), so some of the 86% may be the two settings' acoustics.
+- **Wild boar (a species it never trained on): 40% balanced accuracy, worse than chance**, and the pig detector calls 98% of boar calls "pig". **Don't claim cross-species transfer.** It supports the judge answer "Not this classifier; a new species needs labelled calls."
+
 ## Hour 12: real API live (ml/train_final.py, api/server.py)
 
 - **Demo hold-out:** sessions ETHZ_2014-08-26, NMBU_2017-06-09 and FBN_2014-04-24 (226 calls, 3 labs) are excluded from *everything*: classifier, calibration, neighbours and pig detector. `data/demo_clips.csv` lists them with the final model's verdict.

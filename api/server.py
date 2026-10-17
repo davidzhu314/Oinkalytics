@@ -30,8 +30,11 @@ store = Store()
 
 # The evidence/explanation workstream provides these; fall back to minimal versions until it lands.
 try:
-    from ml.evidence import measure
+    from ml.evidence import load_typical, measure
 except ImportError:
+    def load_typical():
+        return None
+
     def measure(y: np.ndarray, sr: int) -> dict:
         f0 = None
         try:
@@ -134,7 +137,9 @@ def real_predict(data: bytes, filename: str, pen_id=None, hint=None) -> Predicti
 
     features = Features(**measure(y, SR))
     evidence = {"status": status, "abstain_reason": abstain, "p_distressed": round(p, 3),
-                "features": features.model_dump(), "typical": M["typical"],
+                "features": features.model_dump(),
+                # same measurement on both sides once ml/typical.json exists; key medians until then
+                "typical": load_typical() or M["typical"],
                 "similar_calls": [s.model_dump(include={"status", "context", "similarity"}) for s in similar]}
     expl = explain(evidence)
 
