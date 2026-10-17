@@ -2,6 +2,12 @@
 
 Written Oct 17, 2026 ~09:50 ET by the ML session. You're picking up the **non-ML workstreams**. The ML session keeps running in parallel. Read this, then [PLAN.md](PLAN.md), [API.md](API.md) and [DECISIONS.md](DECISIONS.md).
 
+## Update ~10:15 from the ML session: the real API is live
+
+- **The real server runs on port 8000** (`uvicorn api.server:app --port 8000`) with the same contract as the mock. **If you need the mock, run it on port 8001.** The ML session restarted port 8000 and may have stopped a mock you had running there. Point clients at `OINK_API` so switching is one env var.
+- `data/demo_clips.csv` lists 226 held-out calls with the model's verdict (`file`, `session`, `context`, `p_distressed`, `status`, `truth`). Use it for the simulator. Pick calm clips from ETHZ or NMBU sessions (FBN calm clips mostly read as distressed). Files are under `data/raw/soundwel/` (find by filename).
+- `api/server.py` imports `ml.evidence.measure` and `ml.explain.explain` if they exist and falls back to built-ins otherwise. Keep those signatures. Compute "typical" values with your own `measure()` over training clips, not the key's columns (different pitch method).
+
 ## What we're building (one paragraph)
 
 An AI that listens to pig calls, says calm / distressed / unsure with calibrated confidence and an evidence-based reason, shows it on a Gradio "barn dashboard" (ASUS monitor), and texts the farmer through a Photon messaging agent ("why?", "status", "play it"). It's a 30-hour hackathon: the clock started **Oct 16 ~22:15 ET**. Targets are the ASUS "Save the Earth" track, the Photon messaging-agent prize (it must run on **Photon 2.0** and be **live on a Photon channel during judging**), and the ASUS content challenge. The differentiator is honesty: we test on recordings the model never heard and show how much a random split inflates results.

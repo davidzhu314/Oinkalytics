@@ -2,7 +2,15 @@
 
 All the ML runs behind this API. The dashboard and the Photon bot only make HTTP calls. **The contract freezes at hour 12**: after that we can add fields, but never rename or remove them. The source of truth is [api/schemas.py](../api/schemas.py).
 
-## Run the mock (start here)
+## Run the real server
+
+```bash
+.venv/bin/uvicorn api.server:app --port 8000      # needs models/oink.joblib (python -m ml.train_final)
+```
+
+Same contract as the mock; `GET /health` returns `"mode": "real"`. `mock_label` is ignored. Demo clips (unseen recordings) are listed in `data/demo_clips.csv`.
+
+## Run the mock
 
 ```bash
 source .venv/bin/activate

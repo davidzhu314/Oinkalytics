@@ -2,6 +2,16 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 12: real API live (ml/train_final.py, api/server.py)
+
+- **Demo hold-out:** sessions ETHZ_2014-08-26, NMBU_2017-06-09 and FBN_2014-04-24 (226 calls, 3 labs) are excluded from *everything*: classifier, calibration, neighbours and pig detector. `data/demo_clips.csv` lists them with the final model's verdict.
+- **Calibration:** temperature 1.55; expected calibration error 0.056 → **0.023**.
+- **Verdict band:** distressed if p ≥ 0.71, calm if p < 0.40, otherwise "unsure". On leave-session-out out-of-fold data this decides 64% of calls with **balanced accuracy 0.768**; calm calls wrongly flagged drop to **20%** per call (from ~43% at the pen level before); 61% of distressed calls are caught.
+- **Demo hold-out sessions:** decides 48% of calls, **86% correct** on those (balanced acc 0.871). The FBN session is poor (calm calls mostly flagged distressed), so **pick demo calm clips from ETHZ or NMBU.**
+- **Not a pig:** detector (SoundWel + ESC-50 pig vs other ESC-50) has AUC 0.993 on unseen data. 100% of held-out ESC non-pig clips are rejected and 100% of demo pig calls kept. A second check flags a clip if its best cosine match to any training call is < 0.74; claps and coughs score 0.2–0.4, pig calls ~0.9. **Untested on real barn noise.**
+- About 0.34 s per request. Handles m4a via ffmpeg.
+- **Known mismatch:** the "typical" values in explanations come from the key's measured features (a different pitch method than our librosa `measure`). The evidence workstream should recompute typical values with its own `measure()` over training clips.
+
 ## Hour 12: Perch results, and the model we ship (ml/perch_eval.py, ml/perch_sweep.py)
 
 Valence on all 6,887 calls with logistic regression on `emb_call`. Balanced accuracy:
