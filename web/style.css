@@ -146,6 +146,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .chicken.stressed .feather { fill: #f6dcd6; }
 @keyframes flap { from { transform: rotate(0deg); } to { transform: rotate(-38deg); } }
 .ripple.chicken { stroke: var(--beak); }
+.field .pig, .field .chicken { cursor: pointer; outline: none; }
+.field .pig:hover, .field .chicken:hover, .field .pig:focus-visible, .field .chicken:focus-visible { filter: drop-shadow(0 0 4px rgba(255, 255, 255, .95)) drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); }
 .emote { font: 800 18px system-ui, sans-serif; text-anchor: middle; }
 .bubble rect { fill: var(--surface); stroke: var(--line); }
 .bubble text { font: 750 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }

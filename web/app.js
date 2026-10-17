@@ -212,9 +212,42 @@ function fieldSvg() {
     posts);
 }
 
+// Every pen starts with two animals; "＋ Pig" / "＋ Hen" walk more in, up to MAX_ANIMALS.
+const MAX_ANIMALS = 6;
 function herd(kinds) {
-  if (kinds.length > 1) return ["pig", "pig", "chicken", "chicken"];
-  return kinds[0] === "chicken" ? ["chicken", "chicken", "chicken", "chicken"] : ["pig", "pig", "pig"];
+  return kinds.length > 1 ? ["pig", "chicken"] : [kinds[0], kinds[0]];
+}
+
+function addAnimal(pen, kind, walkIn) {
+  if (pen.animals.length >= MAX_ANIMALS) return toast(`Pen ${pen.id} is full (${MAX_ANIMALS} animals).`);
+  const i = pen.animals.length;
+  const n = kind === "pig" ? pigNode() : chickenNode();
+  pen.layer.append(n.g);
+  const x = 90 + (i % 3) * 110 + Math.random() * 20, y = 110 + (i % 2) * 50 + Math.random() * 10;
+  // A new animal starts just outside the left edge of the field and walks in.
+  const a = { ...n, x: walkIn ? -50 : x, y, tx: x, ty: y, rest: walkIn ? 0 : Math.random() * 2, dir: 1,
+    bob: Math.random() * 6, peck: Math.random() * 10, entering: walkIn };
+  const name = kind === "pig" ? "pig" : "hen";
+  n.g.setAttribute("tabindex", "0");
+  n.g.setAttribute("role", "button");
+  n.g.setAttribute("aria-label", `A ${name} in Pen ${pen.id}. Click to hear it.`);
+  n.g.addEventListener("click", () => animalSpeaks(pen, a));
+  n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
+  pen.animals.push(a);
+  for (const b of pen.addBtns) b.disabled = pen.animals.length >= MAX_ANIMALS;
+  if (walkIn) toast(`A new ${name} is walking into Pen ${pen.id}.`);
+}
+
+/** Click an animal: it makes a call of its own species, out loud, and the pen's microphone hears it. */
+async function animalSpeaks(pen, a) {
+  if (!playable(a.kind)) return toast(a.kind === "chicken" && !online.chicken ? "The chicken model isn't connected yet." : `No ${a.kind} calls to play.`);
+  const clip = clipFor(pen, a.kind);
+  play(clip.url);
+  try {
+    const [sp, p] = await judge(await clipBlob(clip.url), clip.name, pen.id);
+    if (sp) pen.last[sp] = p;
+    speak(pen, sp, p, a.kind, a);
+  } catch (e) { toast(`Couldn't check that call: ${e.message}`); }
 }
 
 function buildPen(id) {
@@ -222,13 +255,9 @@ function buildPen(id) {
   const svg = fieldSvg();
   const layer = el("g");
   svg.append(layer);
-  const members = herd(kinds);
-  const animals = members.map((kind, i) => {
-    const n = kind === "pig" ? pigNode() : chickenNode();
-    layer.append(n.g);
-    const x = 60 + i * (290 / Math.max(1, members.length - 1)), y = 105 + (i % 2) * 50;
-    return { ...n, x, y, tx: x, ty: y, rest: Math.random() * 2, dir: 1, bob: Math.random() * 6, peck: Math.random() * 10 };
-  });
+  const animals = [];
+  const addBtns = kinds.map((k) => el("button", { class: "btn small", text: k === "pig" ? "＋ Pig" : "＋ Hen",
+    title: `Walk a new ${k === "pig" ? "pig" : "hen"} into this pen`, onclick: () => addAnimal(pen, k, true) }));
 
   const who = kinds.map((k) => `${SPECIES[k].emoji} ${SPECIES[k].noun}s`).join(" + ");
   const badge = el("span", { class: "badge idle", text: "○ Quiet" });
@@ -251,10 +280,12 @@ function buildPen(id) {
       el("div", { class: "pen-actions" },
         el("button", { class: "btn small", onclick: () => feedPen(pen, true), text: "▶ Play next call" }),
         listen,
-        el("label", { class: "btn small" }, "＋ Add my clips", fileIn))));
+        el("label", { class: "btn small" }, "＋ Add my clips", fileIn)),
+      el("div", { class: "pen-actions" }, addBtns, el("span", { class: "sub small", text: "Click an animal to hear it." }))));
 
-  const pen = { id, kinds, card, svg, animals, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
+  const pen = { id, kinds, card, svg, layer, animals, addBtns, badge, summary, modes, mineBtn, mode: "mixed", mine: [], mineIdx: 0,
     listen: false, level: "idle", levels: {}, last: {}, order: {} };
+  for (const kind of herd(kinds)) addAnimal(pen, kind, false);
   for (const [m, b] of Object.entries(modes)) b.onclick = () => setMode(pen, m);
   listen.onclick = () => { pen.listen = !pen.listen; listen.setAttribute("aria-pressed", pen.listen); };
   const addFiles = (files) => {
@@ -283,7 +314,11 @@ function nextClip(pen) {
   if (pen.mode === "mine" && pen.mine.length) return pen.mine[pen.mineIdx++ % pen.mine.length];
   const kinds = pen.kinds.filter(playable);
   if (!kinds.length) return null;
-  const sp = kinds[Math.floor(Math.random() * kinds.length)];
+  return clipFor(pen, kinds[Math.floor(Math.random() * kinds.length)]);
+}
+
+/** A held-out call of species `sp`, calm or distressed as the pen's microphone mode says. */
+function clipFor(pen, sp) {
   const truth = pen.mode === "distressed" ? "distressed" : pen.mode === "calm" ? "calm" : Math.random() < MIX ? "distressed" : "calm";
   const key = `${sp}:${truth}`;
   if (!pen.order[key]?.length) pen.order[key] = [...pools[sp][truth]].sort(() => Math.random() - 0.5);
@@ -317,10 +352,11 @@ async function feedPen(pen, aloud) {
   speak(pen, sp, p, clip.species);
 }
 
-function speak(pen, sp, p, heardAs) {
+function speak(pen, sp, p, heardAs, speaker) {
   const kind = sp || heardAs;
   const pool = pen.animals.filter((a) => a.kind === kind);
-  const who = (pool.length ? pool : pen.animals)[Math.floor(Math.random() * (pool.length || pen.animals.length))];
+  const who = speaker || (pool.length ? pool : pen.animals)[Math.floor(Math.random() * (pool.length || pen.animals.length))];
+  if (!who) return;
   let label, color = "var(--unsure)";
   if (!sp) label = "Which animal?";
   else if (p.status === "calm") { label = `${SPECIES[sp].words.calm} · ${pct(p.valence.confidence)}`; color = "var(--calm)"; }
@@ -353,8 +389,9 @@ function animate(now) {
     for (const a of pen.animals) {
       const s = stressed(pen, a.kind);
       const hen = a.kind === "chicken";
-      const speed = s ? (hen ? 95 : 75) : (hen ? 28 : 20);
+      const speed = (s ? (hen ? 95 : 75) : (hen ? 28 : 20)) * (a.entering ? 2.5 : 1);
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
+      if (a.entering && d < 2) a.entering = false;
       if (a.rest > 0) a.rest -= dt;
       else if (d < 2) {
         a.tx = 45 + Math.random() * (W - 90);
@@ -386,8 +423,9 @@ function animate(now) {
   }
   // keep animals drawn in depth order
   for (const pen of pens.values()) {
-    const layer = pen.animals[0].g.parentNode;
-    [...pen.animals].sort((a, b) => a.y - b.y).forEach((a) => layer.append(a.g));
+    const focused = document.activeElement;
+    [...pen.animals].sort((a, b) => a.y - b.y).forEach((a) => pen.layer.append(a.g));
+    if (focused && pen.layer.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   requestAnimationFrame(animate);
 }
