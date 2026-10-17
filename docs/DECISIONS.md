@@ -2,6 +2,22 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 1: feature-only baseline (ml/baseline.py)
+
+Valence, using the key's 18 acoustic features, on 6,150 calls (the 737 featureless Transit calls are excluded). Pooled out-of-fold predictions; best model is HistGradientBoosting.
+
+| Split | Accuracy | Balanced acc | Macro-F1 |
+|---|---|---|---|
+| Random (naive) | 0.887 | 0.854 | 0.853 |
+| Leave-session-out (honest) | 0.750 | 0.631 | 0.641 |
+| Leave-team-out (strictest) | 0.682 | 0.576 | 0.577 |
+
+- **The gap is big: 85% → 63% balanced accuracy.** The gap slide stays.
+- **Headline balanced accuracy, not plain accuracy.** Always predicting "distressed" scores 74% accuracy on this subset.
+- Holding out IASPB (all calm) gives only 26% correct, so calm calls from an unseen lab mostly get flagged as distressed. That's the false-alarm risk for a new barn.
+- This is the number Perch has to beat under leave-session-out.
+- **Leak found and fixed:** the 737 NMBU Transit calls are all calm, with no date and no features. They're now their own session (`NMBU_Transit`), and the feature baseline drops them.
+
 ## Hour 0: dataset findings (SoundwelDatasetKey.xlsx)
 
 - **6,887 calls**, not 7,414: the Zenodo release is a subset of the paper's data. Say so on the slide.
