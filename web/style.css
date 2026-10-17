@@ -102,9 +102,9 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
   transition: border-color .3s, box-shadow .3s;
 }
 .pen.watch { border-color: var(--watch); }
-.pen.alert { border-color: var(--alert); box-shadow: 0 0 0 4px rgba(200, 67, 58, .10), var(--shadow); }
-.pen.critical { border-width: 3px; box-shadow: 0 0 0 6px rgba(200, 67, 58, .16), var(--shadow); }
-.badge.alert.critical { background: var(--alert); color: #fff; }
+.pen.alert { border-color: #e2a29b; box-shadow: 0 0 0 3px rgba(200, 67, 58, .06), var(--shadow); }
+.pen.critical { border-color: #d77f76; box-shadow: 0 0 0 4px rgba(200, 67, 58, .09), var(--shadow); }
+.badge.alert.critical { background: #f6d6d2; color: #9b2c25; }
 .pen.dragover { border-color: var(--pig-dark); border-style: dashed; }
 .pen-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; }
 .pen-name { font-weight: 800; font-size: 18px; }

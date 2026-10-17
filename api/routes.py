@@ -47,6 +47,14 @@ def build_router(store: Store, predict_fn: Callable[..., Prediction], health: He
     def pen(pen_id: str):
         return store.pen_status(pen_id)
 
+    @r.post("/pens/{pen_id}/reset", response_model=PenStatus)
+    def reset_pen(pen_id: str):
+        """Clear one pen's recent calls (alerts already sent stay in the alert list)."""
+        if pen_id not in store.history:
+            raise HTTPException(404, f"unknown pen {pen_id}")
+        store.reset_pen(pen_id)
+        return store.pen_status(pen_id)
+
     @r.get("/alerts", response_model=list[Alert])
     def alerts(after: Optional[str] = Query(None, description="Return only alerts newer than this alert_id")):
         return store.alerts_after(after)

@@ -35,6 +35,13 @@ class Store:
             self.alerts: list[Alert] = []
             self.last_alert_at: dict[str, datetime] = {}
 
+    def reset_pen(self, pen_id: str) -> None:
+        """Forget one pen's recent calls and its alert cooldown (the hub calls this when a pen's scenario changes)."""
+        with self._lock:
+            if pen_id in self.history:
+                self.history[pen_id].clear()
+            self.last_alert_at.pop(pen_id, None)
+
     def put_clip(self, clip_id: str, data: bytes, media_type: str = "audio/wav"):
         with self._lock:
             self.clips[clip_id] = (data, media_type)

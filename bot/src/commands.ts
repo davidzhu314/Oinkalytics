@@ -17,6 +17,8 @@ export type Source = {
   emoji?: string;
   /** How a bad pen sounds, for alerts: "stressed" for pigs, "sick" for chickens. */
   bad?: string;
+  /** One animal, for "could be one pig or several". */
+  noun?: string;
 };
 
 /** The reason part of an explanation: everything after its first sentence (the verdict, already in the alert). */
@@ -33,16 +35,23 @@ const TAG: Record<Severity, string> = { warning: "鈿狅笍 Warning", critical: "馃
 
 /** One alert message: what, how sure, the reason, and one hint. The "why" is folded in, so the farmer
  *  doesn't have to ask (texting "why" still works). The microphone counts calls, not animals. */
+/** "The last 4 calls from the pen all sounded stressed" / "3 of the last 5 calls from the pen sounded stressed".
+ *  Counts calls, never animals: two pigs can make four calls. */
+function callCount(n: number, of: number, bad: string, now = false): string {
+  const verb = now ? `now sound ${bad}` : `sounded ${bad}`;
+  return n === of ? `The last ${of} calls from the pen all ${verb}` : `${n} of the last ${of} calls from the pen ${verb}`;
+}
+
 export function alertText(src: Source, a: Alert): string {
-  const who = src.name.toLowerCase();
   const bad = src.bad ?? "stressed";
+  const noun = src.noun ?? "animal";
   const head = src.emoji ? `${src.emoji} Pen ${a.pen_id}` : `Pen ${a.pen_id}`;
   const sure = Math.round(a.confidence * 100);
   const reason = reasonOf(a.explanation.text);
   const sev = severity(a.distressed);
   return [
-    `${TAG[sev]} 路 ${head}: the ${who} sound ${bad} (${sure}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, ` +
-      `from one animal or several.${sev === "critical" ? " Please check the pen now." : ""}`,
+    `${TAG[sev]} 路 ${head} sounds ${bad} (${sure}% sure). ${callCount(a.distressed, a.window, bad)}, could be one ${noun} or several.` +
+      (sev === "critical" ? " Please check the pen now." : ""),
     reason,
     'Reply "play it" to hear the call.',
   ].filter(Boolean).join("\n");
@@ -171,7 +180,7 @@ export async function handle(text: string, sources: Source[], state: BotState): 
 export function escalationText(src: Source, pen: PenStatus): string {
   const bad = src.bad ?? "stressed";
   const head = src.emoji ? `${src.emoji} Pen ${pen.pen_id}` : `Pen ${pen.pen_id}`;
-  return `${TAG.critical} 路 ${head}: it's getting worse. ${pen.distressed} of the last ${pen.window} calls now sound ${bad}. ` +
+  return `${TAG.critical} 路 ${head}: it's getting worse. ${callCount(pen.distressed, pen.window, bad, true)}. ` +
     `Please check the pen now.\nReply "play it" to hear the call.`;
 }
 

@@ -340,9 +340,19 @@ function buildPen(id) {
 
 function setMode(pen, mode) {
   if (mode === "mine" && !pen.mine.length) return toast('Add a clip first: "＋ Add my clips", or drag a file onto the pen.');
+  const changed = pen.mode !== mode;
   pen.mode = mode;
   for (const [m, b] of Object.entries(pen.modes)) b.setAttribute("aria-pressed", m === mode);
   applyMode(pen);
+  if (changed) resetPen(pen);
+}
+
+/** A new scenario starts the pen fresh: both models forget its recent calls, so an old warning clears. */
+async function resetPen(pen) {
+  pen.last = {};
+  await Promise.all(pen.kinds.filter((sp) => online[sp]).map((sp) =>
+    api(`${SPECIES[sp].base}/pens/${pen.id}/reset`, { method: "POST" }).catch(() => {})));
+  pollPens();
 }
 
 const playable = (sp) => online[sp] && pools[sp].calm.length && pools[sp].distressed.length;
@@ -492,7 +502,8 @@ async function pollPens() {
       }
       pen.levels[sp] = !s.window ? "idle" : s.level === "alert" && s.distressed >= CRITICAL_AT ? "critical" : s.level;
       if (RANK[pen.levels[sp]] > RANK[level]) level = pen.levels[sp];
-      if (s.window) parts.push(el("span", {}, `${SPECIES[sp].emoji} `, el("b", { text: `${s.distressed} of last ${s.window}` }), ` sounded ${SPECIES[sp].risk}`));
+      if (s.window) parts.push(el("span", {}, `${SPECIES[sp].emoji} `, el("b", { text: `${s.distressed} of the last ${s.window}` }),
+        ` calls sounded ${sp === "pig" ? "stressed" : "sick"}`));
     }
     if (level === "idle" && !pen.kinds.some((sp) => states[sp])) level = "waiting";
     pen.level = level;
@@ -542,12 +553,14 @@ async function pollAlerts() {
     const key = `${sp}:${a.alert_id}`;
     if (alerts.has(key)) { alerts.get(key).data = a; continue; }
     // The same single message the Photon bot texts (bot/src/commands.ts alertText): the reason is folded in.
-    const who = sp === "pig" ? "pigs" : "chickens", bad = sp === "pig" ? "stressed" : "sick";
+    // The same single message the Photon bot texts (bot/src/commands.ts alertText). It counts calls, not animals.
+    const noun = sp === "pig" ? "pig" : "hen", bad = sp === "pig" ? "stressed" : "sick";
     const reason = a.explanation.text.trim().split(/(?<=[.!?])\s+/).slice(1).join(" ");
     const critical = a.distressed >= CRITICAL_AT;
-    const message = `${critical ? "🚨 Critical" : "⚠️ Warning"} · ${SPECIES[sp].emoji} Pen ${a.pen_id}: the ${who} sound ${bad} ` +
-      `(${Math.round(a.confidence * 100)}% sure). ${a.distressed} of their last ${a.window} calls sounded ${bad}, from one animal or several.` +
-      (critical ? " Please check the pen now." : "");
+    const count = a.distressed === a.window ? `The last ${a.window} calls from the pen all sounded ${bad}`
+      : `${a.distressed} of the last ${a.window} calls from the pen sounded ${bad}`;
+    const message = `${critical ? "🚨 Critical" : "⚠️ Warning"} · ${SPECIES[sp].emoji} Pen ${a.pen_id} sounds ${bad} ` +
+      `(${Math.round(a.confidence * 100)}% sure). ${count}, could be one ${noun} or several.` + (critical ? " Please check the pen now." : "");
     const li = el("li", { class: "sms" },
       el("time", { text: new Date(a.created_at).toLocaleTimeString() }),
       message,

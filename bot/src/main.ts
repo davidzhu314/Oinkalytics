@@ -17,9 +17,9 @@ const FARMER = process.env.FARMER_PHONE;
 const ALLOWED = (process.env.ALLOWED_SENDERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const state: BotState = { muted: ["1", "true", "yes"].includes((process.env.BOT_MUTE ?? "").toLowerCase()) };
 
-const sources: Source[] = [{ name: "Pigs", emoji: "🐷", bad: "stressed", match: /\b(pigs?|barn|sows?|hogs?)\b/, oink: oinkClient(API) }];
+const sources: Source[] = [{ name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /\b(pigs?|barn|sows?|hogs?)\b/, oink: oinkClient(API) }];
 if (CHICKEN_API)
-  sources.push({ name: "Chickens", emoji: "🐔", bad: "sick", match: /\b(chickens?|hens?|coop|birds?|poultry)\b/, oink: oinkClient(CHICKEN_API) });
+  sources.push({ name: "Chickens", emoji: "🐔", bad: "sick", noun: "hen", match: /\b(chickens?|hens?|coop|birds?|poultry)\b/, oink: oinkClient(CHICKEN_API) });
 
 async function loadProviders() {
   if (CHANNEL === "imessage") {

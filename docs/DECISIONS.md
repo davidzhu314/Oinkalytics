@@ -2,6 +2,11 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 18: per-pen reset (additive API change)
+
+- New endpoint **`POST /pens/{pen_id}/reset`** (`api/routes.py`) backed by **`Store.reset_pen()`** (`api/state.py`): clears that pen's recent calls and alert cooldown; alerts already sent stay listed. Nothing existing changed, so the contract still holds; the chicken server inherits it. The hub calls it when a pen's microphone mode changes, so switching a warned pen to Calm clears its warning.
+- Alerts now say what the microphone actually counts: **calls from the pen, not animals** ("The last 4 calls from the pen all sounded stressed, could be one pig or several"). Two pigs can make four calls.
+
 ## Hour 16: Photon credentials, and the chicken add-on checked on the Mac
 
 **Photon credentials.** The bot uses Spectrum (`spectrum-ts`). Its `SPECTRUM_PROJECT_ID` is a **UUID** (`8-4-4-4-12` hex) from David's own Photon project settings, with that project's secret. `pho_prj_…` / `pho_sk_…` keys (the Photon beta dashboard's API keys) are a different API and fail Spectrum's param validation with a 422, which is all the `feat/photon-bot` branch ever reached. `main`'s bot is the canonical one and is live on iMessage. Terminal mode now ignores cloud credentials, so a bad value in `.env` can't break the offline demo.
