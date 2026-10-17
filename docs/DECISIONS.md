@@ -2,6 +2,20 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 21: cross-species training doesn't help (ml/cross_species.py, data/cross_species.csv); not shipped
+
+Added the non-pig calls of the ungulate valence database (Zenodo 14636641, CC BY 4.0; cow, goat, sheep, horse, Przewalski's horse, wild boar; 2,617 calls, 84% negative) to every training fold of the headline test (shipped recipe: clean + noisy SoundWel). Its pig calls were excluded: they're near-copies of SoundWel ETHZ, including a demo hold-out session.
+
+| Training data | Leave-session-out bal acc | AUC | Demo hold-out bal acc / AUC |
+|---|---|---|---|
+| pigs only (shipped) | 0.675 | 0.757 | 0.681 / 0.759 |
+| + cow, goat, sheep, horse | 0.687 | 0.755 | 0.688 / 0.765 |
+| + wild boar only | 0.676 | 0.757 | 0.704 / 0.756 |
+| + all other species | 0.684 | 0.753 | 0.702 / 0.763 |
+
+- **AUC is flat**, so the ~1-point accuracy bump is a threshold shift (calm flagged at p = 0.5: 52% → 48%), not better discrimination. Demo hold-out differences are within noise at n = 226. **Not shipped.**
+- Together with the wild-boar result (a pig model scores below chance on boar), it supports: **other species' valence calls neither transfer to nor improve the pig model; each species needs its own labelled calls.**
+
 ## Hour 20–21: noise-augmented model shipped (ml/noise_train.py; models/oink.joblib swapped)
 
 - **Recipe:** the 86 Bowen noise recordings are split in half by recording (seeded). Each of the 6,661 training calls gets one noisy copy using only the TRAIN half, at a random level of 20/10/5/0/−5 dB. The valence classifier is refitted on clean + noisy; temperature (1.68, was 1.55) and the distressed threshold (0.71, unchanged) are refitted on leave-session-out OOF logits of both. Pig detector, distance check and index unchanged. Old model kept as `models/oink_clean.joblib`; a one-line `cp` reverts it.
