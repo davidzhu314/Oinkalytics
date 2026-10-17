@@ -35,8 +35,7 @@ def feed(trends, store, pen, pattern, start, step_s=1.0):
 
 
 def demo_cfg(**kw):
-    base = dict(recent_s=30, baseline_s=600, min_calls=8, still_s=120, period_s=60, persist_n=3,
-                period_min_calls=10, settle_calls=5, settle_max_distressed=1)
+    base = dict(recent_s=30, baseline_s=600, min_calls=8, period_s=60, persist_n=3, period_min_calls=10)
     base.update(kw)
     return TrendConfig(**base)
 
@@ -66,28 +65,6 @@ def test_noisy_pen_is_called_close_to_normal():
     feed(t, None, "1", [i % 2 == 0 for i in range(60)], T0)  # always ~50% distressed
     tr = t.pen_trend("1", T0 + timedelta(seconds=60))
     assert "close to this pen's normal" in tr.summary
-
-
-def test_settled_after_alert():
-    store, t = Store(), Trends(cfg=demo_cfg(), pens=["1", "2", "3", "4"])
-    alert = feed(t, store, "3", [True] * 3, T0)
-    assert alert is not None
-    feed(t, store, "3", [False] * 5, T0 + timedelta(seconds=60))
-    kinds = [(e.kind, e.alert_id) for e in t.events]
-    assert kinds == [("settled", alert.alert_id)]
-    assert t.events[0].message == "Pen 3 back to normal, 1 min after the alert."
-
-
-def test_still_distressed_once_then_settled():
-    store, t = Store(), Trends(cfg=demo_cfg(still_s=120), pens=["3"])
-    alert = feed(t, store, "3", [True] * 3, T0)
-    feed(t, store, "3", [True, False] * 4, T0 + timedelta(seconds=10))
-    t.evaluate(T0 + timedelta(seconds=130))
-    t.evaluate(T0 + timedelta(seconds=140))   # no duplicate
-    assert [e.kind for e in t.events] == ["still_distressed"]
-    assert "still sounds distressed 2 mins after the alert" in t.events[0].message
-    feed(t, store, "3", [False] * 5, T0 + timedelta(seconds=150))
-    assert [e.kind for e in t.events] == ["still_distressed", "settled"]
 
 
 def _barn_periods(t, n_periods, hot="5", rates=None, start=T0, neighbour_ramp=None):

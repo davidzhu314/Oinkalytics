@@ -47,13 +47,12 @@ export type PenTrend = {
   summary: string;
 };
 
-/** Trends 2 and 3: follow-ups after an alert, and pens with the most distress over time. */
+/** Trend 2: a pen with the most distress in the barn several periods in a row. */
 export type TrendEvent = {
   event_id: string;
-  kind: "settled" | "still_distressed" | "persistent";
+  kind: "persistent";
   pen_id: string;
   created_at: string;
-  alert_id: string | null;
   message: string;
 };
 

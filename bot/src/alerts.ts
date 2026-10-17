@@ -14,7 +14,7 @@ export function alertPoller(opts: {
   return cursorPoller({ ...opts, name: "alerts", list: (after) => opts.oink.alerts(after), idOf: (a) => a.alert_id });
 }
 
-/** Trend events ("back to normal", "still distressed", "most distress N days in a row"). */
+/** Trend events ("Pen 5 has had the most distress in the barn 3 days in a row"). */
 export function trendPoller(opts: {
   oink: Oink;
   state: BotState;

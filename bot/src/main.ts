@@ -80,7 +80,7 @@ const poller = alertPoller({
   },
 });
 
-// Trends 2 and 3: follow-ups after an alert, and pens with the most distress over time.
+// Trend 2: pens with the most distress over time.
 const trends = trendPoller({
   oink,
   state,

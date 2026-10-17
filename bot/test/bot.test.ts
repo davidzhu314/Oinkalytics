@@ -62,12 +62,11 @@ function fakeOink(alerts: Alert[] = [], opts: { down?: boolean; events?: TrendEv
   };
 }
 
-const event = (id: string, kind: TrendEvent["kind"] = "settled"): TrendEvent => ({
+const event = (id: string): TrendEvent => ({
   event_id: id,
-  kind,
+  kind: "persistent",
   pen_id: "3",
   created_at: "2026-10-17T14:12:00Z",
-  alert_id: "a1",
   message: `Pen 3 event ${id}`,
 });
 
@@ -186,7 +185,7 @@ test("trend poller skips old events and sends new ones once", async () => {
   const sent: string[] = [];
   const p = trendPoller({ oink: fakeOink([], { events }), state: { muted: false }, deliver: async (e) => void sent.push(e.event_id) });
   await p.tick();
-  events.push(event("e2", "still_distressed"), event("e3", "persistent"));
+  events.push(event("e2"), event("e3"));
   await p.tick();
   await p.tick();
   assert.deepEqual(sent, ["e2", "e3"]);

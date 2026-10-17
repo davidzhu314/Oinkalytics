@@ -1,10 +1,8 @@
-"""Barn trends from animal sounds: three trends the bot texts the farmer.
+"""Barn trends from animal sounds, texted to the farmer by the bot.
 
 1. Distress vs normal:   each pen's recent share of distressed calls against its own earlier share
                          (or the rest of the barn's, until the pen has history). Added to every alert.
-2. After an alert:       "back to normal" once the pen settles, or "still distressed" if it hasn't
-                         after STILL_S. One text each, per alert.
-3. Most distress over time: the pen with the highest distress share for PERSIST_N periods in a row
+2. Most distress over time: the pen with the highest distress share for PERSIST_N periods in a row
                          (a day by default), plus neighbouring pens that are rising. Can point to
                          illness or another problem the farmer hasn't spotted.
 
@@ -40,10 +38,8 @@ class TrendConfig:
     baseline_s: float = _env("TREND_BASELINE_S", 86400)    # "normal" = the 24 h before that
     min_calls: int = int(_env("TREND_MIN_CALLS", 8))        # fewer confident calls than this = not enough to say
     share_floor: float = _env("TREND_SHARE_FLOOR", 0.05)    # avoids "20x normal" when normal is ~0
-    settle_calls: int = int(_env("TREND_SETTLE_CALLS", 5))  # back to normal: last N calls since the alert...
-    settle_max_distressed: int = int(_env("TREND_SETTLE_MAX", 1))  # ...with at most this many distressed
-    still_s: float = _env("TREND_STILL_S", 1800)            # "still distressed" check, 30 min after the alert
-    period_s: float = _env("TREND_PERIOD_S", 86400)         # trend 3 compares pens per period (a day)
+    recent_min_calls: int = int(_env("TREND_RECENT_MIN_CALLS", 5))  # calls needed to judge "right now"
+    period_s: float = _env("TREND_PERIOD_S", 86400)         # trend 2 compares pens per period (a day)
     persist_n: int = int(_env("TREND_PERSIST_N", 3))        # top pen this many periods in a row
     period_min_calls: int = int(_env("TREND_PERIOD_MIN_CALLS", 10))
     top_ratio: float = _env("TREND_TOP_RATIO", 1.5)         # top pen must be >= 1.5x the other pens' median
@@ -64,10 +60,9 @@ class PenTrend(BaseModel):
 
 class TrendEvent(BaseModel):
     event_id: str
-    kind: Literal["settled", "still_distressed", "persistent"]
+    kind: Literal["persistent"]
     pen_id: str
     created_at: datetime
-    alert_id: Optional[str] = None
     message: str = Field(description="Ready to text as-is")
 
 
@@ -94,12 +89,6 @@ def _pct(x: float) -> str:
 
 
 @dataclass
-class _FollowUp:
-    alert: Alert
-    still_sent: bool = False
-
-
-@dataclass
 class Trends:
     cfg: TrendConfig = field(default_factory=TrendConfig)
     pens: list[str] = field(default_factory=lambda: list(PENS))
@@ -112,21 +101,18 @@ class Trends:
         with self._lock:
             self.calls: dict[str, list[tuple[datetime, bool]]] = defaultdict(list)  # pen -> (time, distressed)
             self.events: list[TrendEvent] = []
-            self.open: dict[str, _FollowUp] = {}          # pen -> follow-up for its latest alert
             self.streak_sent: dict[str, int] = {}          # pen -> last period index it was reported for
             self._checked_period: Optional[int] = None
 
     # ---------- recording ----------
     def record(self, pred: Prediction, alert: Optional[Alert] = None):
-        """Call for every prediction, after the alert rule has run."""
+        """Call for every prediction. `alert` matches the route hook's signature; trends don't need it."""
         with self._lock:
             if pred.pen_id is not None and pred.status != "unsure":
                 if pred.pen_id not in self.pens:
                     self.pens.append(pred.pen_id)
                 self.calls[pred.pen_id].append((pred.created_at, pred.status == "distressed"))
                 self._prune(pred.created_at)
-            if alert is not None:
-                self.open[alert.pen_id] = _FollowUp(alert)
             self.evaluate(pred.created_at)
 
     def _prune(self, at: datetime):
@@ -161,7 +147,7 @@ class Trends:
                     if other != pen:
                         n, k = self._window(other, b_start, at + timedelta(microseconds=1))
                         bn, bk = bn + n, bk + k
-            recent = self._share(rn, rk, min(c.min_calls, c.settle_calls))
+            recent = self._share(rn, rk, min(c.min_calls, c.recent_min_calls))
             normal = self._share(bn, bk, c.min_calls)
             if normal is None:
                 source = None
@@ -179,32 +165,14 @@ class Trends:
                         normal_calls=bn, normal_share=None if normal is None else round(normal, 3),
                         normal_source=source, ratio=ratio, summary=summary)
 
-    # ---------- trends 2 and 3: evaluated on every call and every poll ----------
+    # ---------- trend 2: evaluated on every call and every poll ----------
     def evaluate(self, at: Optional[datetime] = None):
         at = at or now()
         with self._lock:
-            self._follow_ups(at)
             self._persistence(at)
 
-    def _emit(self, kind: str, pen: str, at: datetime, message: str, alert_id: Optional[str] = None):
-        self.events.append(TrendEvent(event_id=new_id("trnd"), kind=kind, pen_id=pen, created_at=at,
-                                      alert_id=alert_id, message=message))
-
-    def _follow_ups(self, at: datetime):
-        c = self.cfg
-        for pen, fu in list(self.open.items()):
-            a = fu.alert
-            since = [d for t, d in self.calls.get(pen, ()) if t > a.created_at]
-            secs = (at - a.created_at).total_seconds()
-            ago = "under a minute" if secs < 60 else _plural(round(secs / 60), "min")
-            if len(since) >= c.settle_calls and sum(since[-c.settle_calls:]) <= c.settle_max_distressed:
-                self._emit("settled", pen, at, f"Pen {pen} back to normal, {ago} after the alert.", a.alert_id)
-                del self.open[pen]
-            elif not fu.still_sent and (at - a.created_at).total_seconds() >= c.still_s:
-                fu.still_sent = True
-                self._emit("still_distressed", pen, at,
-                           f"Pen {pen} still sounds distressed {ago} after the alert. "
-                           "Worth another look.", a.alert_id)
+    def _emit(self, kind: str, pen: str, at: datetime, message: str):
+        self.events.append(TrendEvent(event_id=new_id("trnd"), kind=kind, pen_id=pen, created_at=at, message=message))
 
     def _period_index(self, at: datetime) -> int:
         return int(at.timestamp() // self.cfg.period_s)
