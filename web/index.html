@@ -105,6 +105,47 @@
         <figure><img src="slides/3_confidence.png" alt="Answering every call scores 67%; saying not sure on 40% of calls scores 76% on the rest."></figure>
       </div>
       <p class="sub small">Balanced accuracy, where guessing scores 50%. Data: SoundWel (Briefer et al. 2022, CC BY 4.0). Model: Perch 2.0 embeddings + calibrated logistic regression. Not yet tested in a noisy real barn.</p>
+
+      <h3 class="subhead">Then we tried chickens, and caught the model cheating</h3>
+      <p class="sub">Same pipeline, a second species: healthy vs sick chickens. It scored 99.6% on recordings it had never heard. We didn't believe it, so we checked what else could explain it.</p>
+      <div class="stats">
+        <div class="stat"><b>99.6%</b><span>chicken recordings it never heard</span></div>
+        <div class="stat hl"><b>0.1</b><span>points lost on unseen recordings (pigs lose 23)</span></div>
+        <div class="stat"><b>93.9%</b><span>from 7 simple loudness and noise numbers, no AI</span></div>
+        <div class="stat"><b>81.5%</b><span>from loudness alone</span></div>
+      </div>
+      <div class="charts two">
+        <figure><img src="slides/4_chicken_gap.png" alt="Balanced accuracy. Pigs: 90.3% on a random split, 67.5% on recordings never heard, 22.8 points lost. Chickens: 99.7% and 99.6%, 0.1 points lost."></figure>
+        <figure><img src="slides/5_chicken_features.png" alt="Healthy vs sick chickens on recordings never heard: Perch model 99.6%, all 7 simple features 93.9%, mid-band energy 82.5%, zero-crossing rate 81.9%, loudness 81.5%, peak level 74.0%; coin flip 50%."></figure>
+      </div>
+      <p class="sub">So what is it hearing? Either each folder was recorded with a different microphone or room, or sick birds really do sound different (rattly, laboured breathing shifts the sound in exactly this way). The dataset has no recording details, so nothing can tell those apart. We report it as a confound, not as a 99.6% disease detector: the pipeline moved to a new species in a few hours, and the first thing it did was expose a shortcut a quick read would have published.</p>
+      <p class="sub small">Data: Mendeley "Poultry Vocalization Signal Dataset for Early Disease Detection" (346 recordings, CC BY 4.0). Simple features and model scored on the same split, holding out whole recordings.</p>
+
+      <h3 class="subhead">Does each model know its own animal?</h3>
+      <p class="sub">The mixed pens send every call to both models, and a call only counts for the model that recognises its own animal.</p>
+      <div class="table-wrap">
+        <table class="results">
+          <thead><tr><th>Sounds (held out)</th><th>Played to</th><th>Rejected as "not my animal"</th></tr></thead>
+          <tbody>
+            <tr><td>Pig calls</td><td>Chicken model</td><td><b>20 of 20</b></td></tr>
+            <tr><td>Everyday sounds (ESC-50, no birds or pigs)</td><td>Chicken model</td><td><b>12 of 12</b></td></tr>
+            <tr><td>Healthy chicken recordings (6–8 s)</td><td>Pig model</td><td><b>6 of 6</b></td></tr>
+            <tr><td>Sick chicken calls (under 1 s)</td><td>Pig model</td><td><b>1 of 6</b>: 4 "not sure" (never counted), 1 mistaken for a distressed pig</td></tr>
+            <tr><td>Claps</td><td>Pig model</td><td><b>2 of 2</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="sub small">Our weak spot: half-second chicken squawks sound pig-like to the audio model. Retraining the pig model's "not a pig" check with 250 chicken recordings barely helped (93% to 94% rejected), so we kept the original model and say so here.</p>
+
+      <h3 class="subhead">How it's built, and what the AI does and doesn't do</h3>
+      <ol class="pipeline">
+        <li class="step pre"><span class="tag">Pretrained, not changed</span><b>1. Listen</b><p>Perch 2.0, Google's model for bird and animal sounds, turns each call into 1,536 numbers.</p></li>
+        <li class="step ours"><span class="tag">Trained by us</span><b>2. Decide</b><p>A small classifier learns calm vs distressed from 6,661 labelled pig calls, or healthy vs sick from 248 chicken recordings.</p></li>
+        <li class="step ours"><span class="tag">Fitted by us</span><b>3. Calibrate</b><p>So that "80% sure" is right about 80% of the time. When it's too close to call, it says "not sure".</p></li>
+        <li class="step ours"><span class="tag">Trained by us</span><b>4. Check the animal</b><p>A not-a-pig / not-a-chicken check, plus a "too unlike anything it trained on" check, rejects claps, coughs and the other species.</p></li>
+        <li class="step llm"><span class="tag">AI writer, not trained</span><b>5. Explain</b><p>A language model turns the measured numbers into one plain sentence. It never hears the audio, and anything it adds that isn't in the evidence (a new number, a feeling like "scared", a disease name) is rejected and a template is used instead.</p></li>
+      </ol>
+      <p class="sub small">No language model was trained. Every test holds out whole recordings: the classifier, calibration, similar-call search and animal checks never see the demo clips.</p>
     </section>
   </main>
 
