@@ -372,3 +372,32 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 @keyframes rain { to { background-position: -30px 80px; } }
 .fx-lightning { position: absolute; inset: 0; background: #fff; opacity: 0; animation: lightning 5s infinite; }
 @keyframes lightning { 0%, 88%, 92%, 100% { opacity: 0; } 89% { opacity: .55; } 90% { opacity: .1; } 91% { opacity: .45; } }
+
+/* ---- Per-pen disasters ---- */
+.pen-disaster { position: relative; }
+.ic.danger-ic { background: #fff1ee; border-color: #e8b3a9; }
+.ic.danger-ic.active { background: #7a2318; border-color: #7a2318; animation: banner-pulse 1.2s ease-in-out infinite; }
+.pen-disaster-menu {
+  position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 30; min-width: 190px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  padding: 6px; display: grid; gap: 2px;
+}
+.pen-disaster-menu[hidden], .pen-disaster-menu [hidden] { display: none; }
+.pen-disaster-menu button { font: inherit; font-weight: 650; font-size: 14px; text-align: left; border: 0; background: transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+.pen-disaster-menu button:hover, .pen-disaster-menu button:focus-visible { background: #f6efe0; outline: none; }
+.pen-disaster-menu .clear { border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; color: var(--calm); margin-top: 4px; }
+
+.flame { transform-box: fill-box; transform-origin: 50% 100%; animation: flame-flicker .32s ease-in-out infinite alternate; }
+@keyframes flame-flicker {
+  from { transform: scale(var(--s), var(--s)) skewX(-4deg); }
+  to   { transform: scale(calc(var(--s) * .88), calc(var(--s) * 1.18)) skewX(4deg); }
+}
+.ember-glow { animation: glow 1.1s ease-in-out infinite alternate; }
+@keyframes glow { to { opacity: .35; } }
+
+.wolf.walking .leg-a { animation: legA .18s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: top center; }
+.wolf.walking .leg-b { animation: legA .18s ease-in-out infinite alternate-reverse; transform-box: fill-box; transform-origin: top center; }
+.wolf .jaw { transform-box: fill-box; transform-origin: 0% 0%; }
+.wolf.chomp .jaw { animation: chomp .16s ease-in-out infinite alternate; }
+@keyframes chomp { to { transform: rotate(22deg); } }
+.pen.shaking { animation: shake .5s ease-in-out 1; }

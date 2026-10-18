@@ -6,7 +6,7 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const SVG = "http://www.w3.org/2000/svg";
 
 function el(tag, attrs = {}, ...kids) {
-  const isSvg = ["svg", "g", "rect", "ellipse", "circle", "path", "text", "line", "animate"].includes(tag);
+  const isSvg = ["svg", "g", "rect", "ellipse", "circle", "path", "text", "line", "animate", "polyline", "defs", "radialGradient", "linearGradient", "stop"].includes(tag);
   const node = isSvg ? document.createElementNS(SVG, tag) : document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
@@ -405,6 +405,12 @@ function buildPen(spec) {
     return b;
   });
   const steppers = kinds.map((k, i) => el("span", { class: "stepper" }, removeBtns[i], addBtns[i]));
+  const dBtn = icon("⚠️", "Disaster in this pen", "danger-ic");
+  dBtn.setAttribute("aria-haspopup", "true"); dBtn.setAttribute("aria-expanded", "false");
+  const dMenu = el("div", { class: "pen-disaster-menu", role: "menu", hidden: true },
+    Object.entries(DISASTERS).map(([k, v]) => el("button", { role: "menuitem", "data-d": k, text: v.label })),
+    el("button", { role: "menuitem", class: "clear", "data-d": "clear", hidden: true, text: "✓ All clear" }));
+  const dWrap = el("span", { class: "pen-disaster" }, dBtn, dMenu);
   const exitLayer = el("g");
   svg.append(exitLayer);
 
@@ -434,9 +440,9 @@ function buildPen(spec) {
       summary,
       el("div", { class: "pen-tools" },
         el("div", { class: "seg", role: "group", "aria-label": "What this pen's microphone hears" }, Object.values(modes)),
-        el("div", { class: "tools" }, steppers, clips, listen))));
+        el("div", { class: "tools" }, steppers, clips, listen, dWrap))));
 
-  const pen = { id, name: spec.name, kinds, card, svg, layer, exitLayer, exiting: [], animals, addBtns, removeBtns, hint, badge, summary, modes, mineBtn,
+  const pen = { id, name: spec.name, kinds, card, svg, layer, exitLayer, dBtn, dMenu, exiting: [], animals, addBtns, removeBtns, hint, badge, summary, modes, mineBtn,
     mode: spec.mode || "mixed", mine: [], mineIdx: 0, listen: false, level: "idle", levels: {}, last: {}, order: {} };
   penNames[id] = pen.name;
   penCreated[id] = spec.created || new Date().toISOString();
@@ -453,6 +459,17 @@ function buildPen(spec) {
   title.addEventListener("change", rename);
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); if (e.key === "Escape") { title.value = pen.name; title.blur(); } });
   remove.onclick = () => removePen(pen);
+  dBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeDisasterMenus(dMenu);
+    dMenu.hidden = !dMenu.hidden;
+    dBtn.setAttribute("aria-expanded", String(!dMenu.hidden));
+  };
+  for (const b of dMenu.querySelectorAll("button")) b.onclick = (e) => {
+    e.stopPropagation();
+    dMenu.hidden = true; dBtn.setAttribute("aria-expanded", "false");
+    if (b.dataset.d === "clear") stopFx(pen); else startFx(pen, b.dataset.d);
+  };
   for (const [m, b] of Object.entries(modes)) b.onclick = () => setMode(pen, m);
   listen.onclick = () => { pen.listen = !pen.listen; listen.setAttribute("aria-pressed", pen.listen); };
   const addFiles = (files) => {
@@ -482,6 +499,7 @@ function addPen() {
 function removePen(pen) {
   if (pens.size === 1) return toast("Keep at least one pen.");
   if (!confirm(`Remove ${pen.name}? Its animals and recent calls go with it.`)) return;
+  if (pen.fx) stopFx(pen, true);
   unsyncPen(pen); // the servers stop tracking it, so it can't keep alerting
   pens.delete(pen.id);
   pen.card.remove();
@@ -584,10 +602,18 @@ function animate(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
   for (const pen of pens.values()) {
+    if (pen.fx) updateFx(pen, dt);
     for (const a of pen.animals) {
       const s = a.mood === "distressed";
       const hen = a.kind === "chicken";
-      const speed = (hen ? 18 : 14) * (a.entering ? 3.5 : 1) * (REDUCED_MOTION && !a.entering ? 0 : 1);
+      const panic = !!pen.fx && !a.entering;
+      const speed = (hen ? 18 : 14) * (a.entering ? 3.5 : panic ? 4.2 : 1) * (REDUCED_MOTION && !a.entering ? 0 : 1);
+      if (panic) {
+        // panicking animals never rest: they keep running away from the danger
+        a.rest = 0;
+        a.panicT = (a.panicT ?? 0) - dt;
+        if (a.panicT <= 0 || Math.hypot(a.tx - a.x, a.ty - a.y) < 4) { [a.tx, a.ty] = panicTarget(pen, a); a.panicT = rnd(0.5, 1.1); }
+      }
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
       if (a.entering && d < 2) a.entering = false;
       if (a.rest > 0) a.rest -= dt;
@@ -605,7 +631,7 @@ function animate(now) {
       a.bob += dt * (hen ? 10 : 7);
       // pigs bob; chickens hop
       const bob = walking ? (hen ? -Math.abs(Math.sin(a.bob)) * 3 : Math.sin(a.bob) * 1.4) : 0;
-      const shake = 0;
+      const shake = panic ? Math.sin(now / 30 + a.x) * 1.3 : 0;
       a.g.setAttribute("transform", `translate(${(a.x + shake).toFixed(1)},${(a.y + bob).toFixed(1)})`);
       a.flip.setAttribute("transform", `scale(${a.dir},1)`);
       if (hen) {
@@ -841,86 +867,330 @@ async function toggleRecord() {
   btn.classList.add("rec");
 }
 
-// ---------- Disasters (demo) ----------
+// ---------- Disasters (demo, one pen at a time) ----------
 // A disaster only decides which held-out recordings the animals make (real distress calls, more often);
 // the models still judge every call for real, and the alerts and emergency follow from what they hear.
 const DISASTERS = {
-  wildlife: { banner: "🐺 A wolf got into the pen!", toast: "🐺 A wolf broke into" },
-  asteroid: { banner: "☄️ Asteroid impact!", toast: "☄️ An asteroid hit" },
-  fire: { banner: "🔥 Fire in the pen!", toast: "🔥 Fire broke out in" },
-  storm: { banner: "🌪️ Tornado over the barn!", toast: "🌪️ A storm hit the barn:" },
+  wolf: { label: "🐺 Wolf attack", banner: "🐺 A wolf got into the pen!" },
+  comet: { label: "☄️ Comet strike", banner: "☄️ A comet hit the pen!" },
+  fire: { label: "🔥 Fire", banner: "🔥 Fire in the pen!" },
+  storm: { label: "⛈️ Storm", banner: "⛈️ Storm over the pen!" },
 };
-const fireTimers = [];
-const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const GROUND = { x0: 30, x1: W - 30, y0: 85, y1: H - 25 };
 
-function fxNodes(kind) {
-  if (kind === "wildlife") return [el("span", { class: "fx-wolf", text: "🐺" })];
-  if (kind === "asteroid") return [el("div", { class: "fx-crater" }), el("div", { class: "fx-flash" }), el("span", { class: "fx-meteor", text: "☄️" })];
-  if (kind === "fire") return [el("div", { class: "fx-smoke" }),
-    ...Array.from({ length: 8 }, (_, i) => el("span", { class: "fx-flame", text: "🔥", style: `left:${4 + i * 12}%;animation-delay:${(i % 4) * 0.18}s` }))];
-  return [el("span", { class: "fx-tornado", text: "🌪️" })];
+function wolfNode() {
+  const leg = (x, cls) => el("rect", { class: `leg ${cls}`, x, y: 8, width: 6, height: 16, rx: 2, fill: "#4b5058" });
+  const jaw = el("path", { class: "jaw", d: "M34,-6 l15,1 l-13,6 z", fill: "#5c616a" });
+  const flip = el("g", { class: "flip" },
+    el("ellipse", { cx: 0, cy: 25, rx: 32, ry: 4.5, fill: "rgba(25,25,25,.22)" }),
+    el("path", { d: "M-28,-8 q-22,-8 -30,6 q12,-3 26,4 z", fill: "#5c616a" }),
+    leg(-22, "leg-a"), leg(-11, "leg-b"), leg(9, "leg-b"), leg(19, "leg-a"),
+    el("ellipse", { cx: 0, cy: 0, rx: 31, ry: 14, fill: "#80868f" }),
+    el("path", { d: "M-26,-6 q22,-16 50,-4 q-24,3 -50,4 z", fill: "#5c616a" }),
+    el("ellipse", { cx: 6, cy: 6, rx: 20, ry: 6, fill: "#a7acb3" }),
+    jaw,
+    el("circle", { cx: 27, cy: -11, r: 11.5, fill: "#80868f" }),
+    el("path", { d: "M33,-17 l17,6 l-16,5 z", fill: "#80868f" }),
+    el("path", { class: "teeth", d: "M37,-6 l2,3 l2,-3 l2,3 l2,-3", fill: "none", stroke: "#fff", "stroke-width": 1.2 }),
+    el("circle", { cx: 49, cy: -11, r: 2.2, fill: "#1b1b1b" }),
+    el("path", { d: "M19,-19 l3,-13 l8,10 z", fill: "#5c616a" }),
+    el("path", { d: "M26,-21 l5,-12 l6,11 z", fill: "#5c616a" }),
+    el("circle", { cx: 32, cy: -14, r: 2.1, fill: "#f2c14e" }),
+    el("circle", { cx: 32.6, cy: -14.2, r: 0.9, fill: "#1b1b1b" }));
+  return { g: el("g", { class: "wolf walking" }, flip), flip };
 }
 
-function strike(pen, kind) {
+function puff(layer, x, y, color, n = 10) {
+  // a burst of little bits (fur, feathers, dust) that fly out and fade
+  for (let i = 0; i < n; i++) {
+    const c = el("circle", { cx: x, cy: y, r: rnd(2, 4.5), fill: color });
+    layer.append(c);
+    const vx = rnd(-70, 70), vy = rnd(-90, -10), t0 = performance.now();
+    const step = (now) => {
+      const t = (now - t0) / 1000;
+      c.setAttribute("cx", (x + vx * t).toFixed(1));
+      c.setAttribute("cy", (y + vy * t + 120 * t * t).toFixed(1));
+      c.setAttribute("opacity", Math.max(0, 1 - t / 0.9).toFixed(2));
+      if (t < 0.9) requestAnimationFrame(step); else c.remove();
+    };
+    requestAnimationFrame(step);
+  }
+}
+
+function svgDefs(pen) {
+  // gradients for the comet and flames, unique per pen
+  const id = (n) => `${n}-${pen.id}`;
+  return el("defs", {},
+    el("radialGradient", { id: id("cometHead") },
+      el("stop", { offset: "0", "stop-color": "#ffffff" }), el("stop", { offset: ".35", "stop-color": "#fff1a8" }),
+      el("stop", { offset: ".7", "stop-color": "#ff9a3c" }), el("stop", { offset: "1", "stop-color": "#ff5a1f", "stop-opacity": "0" })),
+    el("linearGradient", { id: id("cometTail"), x1: 1, y1: 0, x2: 0, y2: 0 },
+      el("stop", { offset: "0", "stop-color": "#fff6c8", "stop-opacity": ".95" }), el("stop", { offset: ".35", "stop-color": "#ffb347", "stop-opacity": ".7" }),
+      el("stop", { offset: "1", "stop-color": "#ff6a3d", "stop-opacity": "0" })),
+    el("linearGradient", { id: id("scorch"), x1: 0, y1: 0, x2: 1, y2: 0 },
+      el("stop", { offset: "0", "stop-color": "#2a1a10", "stop-opacity": ".55" }), el("stop", { offset: ".85", "stop-color": "#3a2214", "stop-opacity": ".45" }),
+      el("stop", { offset: "1", "stop-color": "#3a2214", "stop-opacity": "0" })));
+}
+
+function flameNode(scale) {
+  const tear = "M0,0 C-11,-6 -10,-24 0,-38 C10,-24 11,-6 0,0 Z";
+  // outer group: position (set by the caller); inner group: the CSS flicker
+  return el("g", { class: "flame-pos" }, el("g", { class: "flame", style: `--s:${scale.toFixed(2)};animation-delay:${rnd(0, .4).toFixed(2)}s` },
+    el("path", { d: tear, fill: "#d8361c", transform: "scale(1.15,1.1)" }),
+    el("path", { d: tear, fill: "#f4832a", transform: "scale(.85,.85)" }),
+    el("path", { d: tear, fill: "#ffd45c", transform: "scale(.5,.55)" })));
+}
+
+/** Start a disaster in one pen. */
+function startFx(pen, kind) {
+  if (!pen.animals.length) return toast(`${pen.name} is empty: add some animals first.`);
+  if (pen.fx) stopFx(pen, true);
   if (!pen.disaster) pen.prevMode = pen.mode === "mine" ? "mixed" : pen.mode;
   pen.disaster = kind;
-  pen.card.querySelector(".disaster-fx")?.remove();
+  const under = el("g", { class: "fx-under" }), over = el("g", { class: "fx-over" });
+  pen.svg.insertBefore(under, pen.layer);
+  pen.svg.append(over);
+  if (!pen.defs) { pen.defs = svgDefs(pen); pen.svg.prepend(pen.defs); }
+  const fx = (pen.fx = { kind, t: 0, under, over, parts: [] });
+  if (kind === "wolf") {
+    const w = wolfNode();
+    over.append(w.g);
+    fx.wolf = { ...w, x: -60, y: rnd(120, 180), dir: 1, state: "enter", rest: 0, eaten: 0, target: null };
+  } else if (kind === "comet") {
+    fx.impact = { x: rnd(140, 290), y: rnd(130, 185) };
+    fx.from = { x: W + 30, y: -50 };
+    const ang = Math.atan2(fx.impact.y - fx.from.y, fx.impact.x - fx.from.x) * 180 / Math.PI;
+    fx.comet = el("g", { class: "comet" },
+      el("g", { transform: `rotate(${ang.toFixed(1)})` },
+        el("path", { d: "M0,-14 L-230,-3 L-230,3 L0,14 Z", fill: `url(#cometTail-${pen.id})` }),
+        el("circle", { r: 34, fill: `url(#cometHead-${pen.id})`, opacity: .6 }),
+        el("circle", { r: 14, fill: `url(#cometHead-${pen.id})` })));
+    // the tail is drawn toward -x and the group is rotated to the travel direction, so it trails behind
+    over.append(fx.comet);
+  } else if (kind === "fire") {
+    fx.front = -20;
+    fx.scorch = el("rect", { x: 0, y: 46, width: 0, height: H - 46, fill: `url(#scorch-${pen.id})` });
+    under.append(fx.scorch);
+    fx.spawn = 0; fx.ember = 0; fx.smoke = 0;
+  } else if (kind === "storm") {
+    fx.dark = el("rect", { x: 0, y: 0, width: W, height: H, fill: "rgba(18,22,38,.38)" });
+    fx.clouds = el("g", { class: "clouds" },
+      ...[[40, 18, 70, 26], [120, 10, 80, 28], [210, 20, 90, 30], [300, 8, 85, 27], [370, 22, 70, 24], [80, 34, 60, 18], [260, 38, 70, 20]]
+        .map(([cx, cy, rx, ry], i) => el("ellipse", { cx, cy, rx, ry, fill: i % 2 ? "#3c4250" : "#4b5262" })));
+    fx.rain = Array.from({ length: 55 }, () => {
+      const l = el("line", { stroke: "rgba(200,215,240,.75)", "stroke-width": 1.3, "stroke-linecap": "round" });
+      return { l, x: rnd(-40, W + 40), y: rnd(0, H) };
+    });
+    fx.flash = el("rect", { x: 0, y: 0, width: W, height: H, fill: "#fff", opacity: 0 });
+    over.append(fx.dark, ...fx.rain.map((r) => r.l), fx.clouds, fx.flash);
+    fx.nextBolt = rnd(0.8, 2); fx.gust = 1; fx.gustT = 3;
+  }
   pen.card.querySelector(".disaster-banner")?.remove();
-  pen.card.querySelector(".field-wrap").append(el("div", { class: `disaster-fx ${kind}`, "aria-hidden": "true" }, fxNodes(kind)));
   pen.card.querySelector(".pen-head").after(el("div", { class: "disaster-banner", role: "status", text: DISASTERS[kind].banner }));
   pen.card.classList.add("disaster");
+  for (const a of pen.animals) a.panicT = 0;
   if (pen.mode !== "distressed") setMode(pen, "distressed");
+  updateDisasterMenu(pen);
+  toast(`${DISASTERS[kind].banner.replace("the pen", pen.name)}`);
+  if (!running) { $("#speed").value = "0.5"; $("#speedOut").textContent = "0.5 s"; setRunning(true); }
 }
 
-function disaster(kind) {
-  $("#disasterMenu").hidden = true;
-  $("#disasterBtn").setAttribute("aria-expanded", "false");
-  if (kind === "clear") return allClear();
-  const all = [...pens.values()];
-  const occupied = all.filter((p) => p.animals.length);
-  if (!occupied.length) return toast("Add some animals first: a disaster needs someone to panic.");
-  let hit = [];
-  if (kind === "wildlife") hit = [pick(occupied)];
-  else if (kind === "storm") {
-    hit = occupied;
-    document.body.classList.add("storming");
-    if (!$(".storm-fx")) document.body.append(el("div", { class: "storm-fx", "aria-hidden": "true" }, el("div", { class: "fx-rain" }), el("div", { class: "fx-lightning" })));
-  } else if (kind === "asteroid") {
-    const t = pick(occupied);
-    hit = [t];
-    const i = all.indexOf(t);
-    // the blast reaches the neighbouring pens a moment after impact
-    setTimeout(() => [all[i - 1], all[i + 1]].filter((p) => p && p.animals.length && pens.has(p.id)).forEach((p) => strike(p, "asteroid")), 1600);
-  } else if (kind === "fire") {
-    const start = pick(occupied);
-    hit = [start];
-    const order = [...occupied.slice(occupied.indexOf(start) + 1), ...occupied.slice(0, occupied.indexOf(start))];
-    order.forEach((p, k) => fireTimers.push(setTimeout(() => { if (pens.has(p.id)) { strike(p, "fire"); toast(`🔥 The fire spread to ${p.name}.`); } }, 5000 * (k + 1))));
-  }
-  hit.forEach((p) => strike(p, kind));
-  toast(`${DISASTERS[kind].toast} ${hit.map((p) => p.name).join(", ")}!`);
-  if (!running) {
-    $("#speed").value = "0.5"; $("#speedOut").textContent = "0.5 s";
-    setRunning(true);
+function stopFx(pen, quiet = false) {
+  if (!pen.fx) return;
+  if (pen.fx.wolf) {
+    // the wolf runs off
+    const w = pen.fx.wolf, g = w.g, over = pen.fx.over;
+    pen.svg.append(over);
+    const t0 = performance.now(), x0 = w.x;
+    w.flip.setAttribute("transform", "scale(-1,1)");
+    const run = (now) => {
+      const x = x0 - (now - t0) / 1000 * 180;
+      g.setAttribute("transform", `translate(${x.toFixed(1)},${w.y.toFixed(1)})`);
+      if (x > -80) requestAnimationFrame(run); else over.remove();
+    };
+    requestAnimationFrame(run);
+  } else pen.fx.over.remove();
+  pen.fx.under.remove();
+  delete pen.fx;
+  pen.card.querySelector(".disaster-banner")?.remove();
+  pen.card.classList.remove("disaster", "shaking");
+  const back = pen.prevMode || "mixed";
+  delete pen.disaster; delete pen.prevMode;
+  if (!quiet) { setMode(pen, back); toast(`✓ All clear in ${pen.name}.`); }
+  updateDisasterMenu(pen);
+}
+
+function eat(pen, a) {
+  // the wolf catches an animal: it vanishes in a puff of fur or feathers
+  puff(pen.fx.over, a.x, a.y - 4, a.kind === "pig" ? "#f2a3b3" : "#f7f3ea", 14);
+  a.g.remove();
+  pen.animals.splice(pen.animals.indexOf(a), 1);
+  updateHint(pen); updateCounts(pen); savePens();
+  toast(`🐺 The wolf caught a ${a.kind === "pig" ? "pig" : "hen"} in ${pen.name}!`);
+}
+
+/** Where a panicking animal runs next: away from the danger. */
+function panicTarget(pen, a) {
+  const fx = pen.fx;
+  let tx = rnd(GROUND.x0, GROUND.x1), ty = rnd(GROUND.y0, GROUND.y1);
+  const away = (p, far) => {
+    const dx = a.x - p.x, dy = a.y - p.y, d = Math.hypot(dx, dy) || 1;
+    tx = a.x + (dx / d) * far + rnd(-40, 40); ty = a.y + (dy / d) * far * 0.6 + rnd(-30, 30);
+    if (tx < GROUND.x0 + 5 || tx > GROUND.x1 - 5) tx = rnd(GROUND.x0, GROUND.x1); // cornered: dash anywhere
+  };
+  if (fx.kind === "wolf") away(fx.wolf, 150);
+  else if (fx.kind === "comet" && fx.landed) away(fx.impact, 170);
+  else if (fx.kind === "fire") tx = rnd(Math.min(GROUND.x1 - 20, fx.front + 70), GROUND.x1);
+  else if (fx.kind === "storm") tx += fx.gust * 90;
+  return [clamp(tx, GROUND.x0, GROUND.x1), clamp(ty, GROUND.y0, GROUND.y1)];
+}
+
+/** Advance one pen's disaster by dt seconds. */
+function updateFx(pen, dt) {
+  const fx = pen.fx;
+  fx.t += dt;
+  if (fx.kind === "wolf") {
+    const w = fx.wolf;
+    if (w.rest > 0) {
+      w.rest -= dt;
+      w.g.classList.toggle("chomp", w.rest > 0.4);
+    } else {
+      if (!w.target || !pen.animals.includes(w.target)) w.target = pen.animals.length ? pen.animals.reduce((b, a) => (Math.hypot(a.x - w.x, a.y - w.y) < Math.hypot(b.x - w.x, b.y - w.y) ? a : b)) : null;
+      const goal = w.eaten >= 2 || !w.target ? { x: W / 2 + Math.sin(fx.t) * 120, y: 150 + Math.cos(fx.t * 1.3) * 40 } : w.target;
+      const dx = goal.x - w.x, dy = goal.y - w.y, d = Math.hypot(dx, dy) || 1;
+      const sp = w.eaten >= 2 ? 45 : 78;
+      w.x += (dx / d) * Math.min(d, sp * dt); w.y += (dy / d) * Math.min(d, sp * dt);
+      if (Math.abs(dx) > 2) w.dir = dx < 0 ? -1 : 1;
+      if (w.target && w.eaten < 2 && d < 24 && fx.t > 2.5) { eat(pen, w.target); w.eaten += 1; w.rest = 1.8; w.target = null; }
+    }
+    w.g.classList.toggle("walking", w.rest <= 0);
+    w.g.setAttribute("transform", `translate(${w.x.toFixed(1)},${(w.y + (w.rest > 0 ? 0 : Math.sin(fx.t * 14) * 1.5)).toFixed(1)})`);
+    w.flip.setAttribute("transform", `scale(${w.dir},1)`);
+  } else if (fx.kind === "comet") {
+    const T = 1.8;
+    if (!fx.landed) {
+      const k = Math.min(1, fx.t / T), e = 0.4 * k + 0.6 * k * k; // visible from the start, speeding up
+      const x = fx.from.x + (fx.impact.x - fx.from.x) * e, y = fx.from.y + (fx.impact.y - fx.from.y) * e;
+      fx.comet.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${(0.85 + 0.35 * k).toFixed(2)})`);
+      if (k >= 1) {
+        fx.landed = true;
+        fx.comet.remove();
+        const { x: ix, y: iy } = fx.impact;
+        fx.under.append(
+          el("ellipse", { cx: ix, cy: iy + 4, rx: 46, ry: 16, fill: "#4a3424", opacity: .55 }),
+          el("ellipse", { cx: ix, cy: iy + 3, rx: 34, ry: 11, fill: "#2b1d14" }),
+          el("ellipse", { cx: ix, cy: iy + 3, rx: 34, ry: 11, fill: "none", stroke: "#8a6440", "stroke-width": 3 }),
+          el("ellipse", { cx: ix - 4, cy: iy + 1, rx: 12, ry: 4, fill: "#ff8a3c", opacity: .85, class: "ember-glow" }));
+        fx.flashC = el("circle", { cx: ix, cy: iy, r: 10, fill: "#fff6d4" });
+        fx.ring = el("circle", { cx: ix, cy: iy, r: 10, fill: "none", stroke: "#fff1c2", "stroke-width": 4 });
+        fx.over.append(fx.flashC, fx.ring);
+        fx.tImpact = fx.t;
+        puff(fx.over, ix, iy, "#6b4a2e", 16); puff(fx.over, ix, iy, "#ff9a3c", 10);
+        pen.card.classList.add("shaking");
+        setTimeout(() => pen.card.classList.remove("shaking"), 650);
+        for (const a of pen.animals) a.panicT = 0;
+      }
+    } else {
+      const s = fx.t - fx.tImpact;
+      fx.flashC.setAttribute("r", (10 + 260 * Math.min(1, s / 0.5)).toFixed(1));
+      fx.flashC.setAttribute("opacity", Math.max(0, 0.95 - s / 0.5).toFixed(2));
+      fx.ring.setAttribute("r", (10 + 200 * Math.min(1, s / 0.9)).toFixed(1));
+      fx.ring.setAttribute("opacity", Math.max(0, 1 - s / 0.9).toFixed(2));
+      fx.smoke = (fx.smoke || 0) - dt;
+      if (fx.smoke <= 0) { fx.smoke = 0.35; rise(fx, fx.impact.x + rnd(-14, 14), fx.impact.y, "#5d5a57", 3.5); }
+    }
+  } else if (fx.kind === "fire") {
+    fx.front = Math.min(W * 0.62, fx.front + dt * 14);
+    fx.scorch.setAttribute("width", Math.max(0, fx.front + 30).toFixed(1));
+    fx.spawn -= dt; fx.ember -= dt; fx.smoke -= dt;
+    if (fx.spawn <= 0) {
+      fx.spawn = 0.12;
+      const f = flameNode(rnd(0.6, 1.25));
+      const x = rnd(Math.max(-10, fx.front - 70), fx.front + 8), y = rnd(70, H - 10);
+      f.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+      // nearer flames drawn on top
+      const after = [...fx.under.querySelectorAll(".flame-pos")].find((n) => +n.dataset.y > y);
+      f.dataset.y = y;
+      fx.under.insertBefore(f, after || null);
+      fx.parts.push({ n: f, life: rnd(2.2, 3.6) });
+    }
+    if (fx.ember <= 0) { fx.ember = 0.06; spark(fx, rnd(fx.front - 60, fx.front), rnd(90, H - 15)); }
+    if (fx.smoke <= 0) { fx.smoke = 0.3; rise(fx, rnd(fx.front - 70, fx.front), rnd(80, 200), "#4b4642", 4); }
+    for (const p of [...fx.parts]) {
+      p.life -= dt;
+      if (p.life <= 0) { p.n.remove(); fx.parts.splice(fx.parts.indexOf(p), 1); }
+      else if (p.life < 0.5) p.n.setAttribute("opacity", (p.life / 0.5).toFixed(2));
+    }
+  } else if (fx.kind === "storm") {
+    for (const r of fx.rain) {
+      r.y += 430 * dt; r.x += (fx.gust * 90 - 20) * dt;
+      if (r.y > H) { r.y = rnd(-20, 0); r.x = rnd(-40, W + 40); }
+      r.l.setAttribute("x1", r.x.toFixed(1)); r.l.setAttribute("y1", r.y.toFixed(1));
+      r.l.setAttribute("x2", (r.x + fx.gust * 4 - 2).toFixed(1)); r.l.setAttribute("y2", (r.y + 11).toFixed(1));
+    }
+    fx.clouds.setAttribute("transform", `translate(${(Math.sin(fx.t * 0.35) * 18).toFixed(1)},0)`);
+    fx.gustT -= dt;
+    if (fx.gustT <= 0) { fx.gustT = rnd(2.5, 4); fx.gust = -fx.gust; for (const a of pen.animals) a.panicT = 0; }
+    fx.nextBolt -= dt;
+    if (fx.nextBolt <= 0) { fx.nextBolt = rnd(2.2, 4.5); bolt(pen); }
   }
 }
 
-function allClear() {
-  fireTimers.splice(0).forEach(clearTimeout);
-  document.body.classList.remove("storming");
-  $(".storm-fx")?.remove();
-  let n = 0;
-  for (const pen of pens.values()) {
-    if (!pen.disaster) continue;
-    n += 1;
-    pen.card.querySelector(".disaster-fx")?.remove();
-    pen.card.querySelector(".disaster-banner")?.remove();
-    pen.card.classList.remove("disaster");
-    const back = pen.prevMode || "mixed";
-    delete pen.disaster; delete pen.prevMode;
-    setMode(pen, back);
-  }
-  toast(n ? "✓ All clear. The pens are back to normal." : "Nothing to clear.");
+function rise(fx, x, y, color, life) {
+  const c = el("circle", { cx: x, cy: y, r: rnd(5, 9), fill: color, opacity: .55 });
+  fx.over.insertBefore(c, fx.over.firstChild);
+  const t0 = performance.now(), drift = rnd(-12, 12);
+  const step = (now) => {
+    const t = (now - t0) / 1000;
+    if (!c.isConnected) return;
+    c.setAttribute("cy", (y - 26 * t).toFixed(1)); c.setAttribute("cx", (x + drift * t).toFixed(1));
+    c.setAttribute("r", (7 + 9 * t).toFixed(1)); c.setAttribute("opacity", Math.max(0, .55 * (1 - t / life)).toFixed(2));
+    if (t < life) requestAnimationFrame(step); else c.remove();
+  };
+  requestAnimationFrame(step);
+}
+
+function spark(fx, x, y) {
+  const c = el("circle", { cx: x, cy: y, r: rnd(1, 2.2), fill: Math.random() < .5 ? "#ffcc4d" : "#ff7b2e" });
+  fx.over.append(c);
+  const t0 = performance.now(), vx = rnd(-15, 15), vy = rnd(-70, -35);
+  const step = (now) => {
+    const t = (now - t0) / 1000;
+    if (!c.isConnected) return;
+    c.setAttribute("cx", (x + vx * t + Math.sin(t * 9) * 3).toFixed(1)); c.setAttribute("cy", (y + vy * t).toFixed(1));
+    c.setAttribute("opacity", Math.max(0, 1 - t / 1.3).toFixed(2));
+    if (t < 1.3) requestAnimationFrame(step); else c.remove();
+  };
+  requestAnimationFrame(step);
+}
+
+function bolt(pen) {
+  // a forked lightning bolt from the clouds to the ground, with a flash
+  const fx = pen.fx;
+  let x = rnd(60, W - 60), y = 30;
+  const pts = [[x, y]];
+  while (y < 180) { y += rnd(14, 26); x += rnd(-22, 22); pts.push([x, y]); }
+  const d = pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
+  const glow = el("polyline", { points: d, fill: "none", stroke: "#cfe0ff", "stroke-width": 9, opacity: .35, "stroke-linejoin": "round" });
+  const core = el("polyline", { points: d, fill: "none", stroke: "#fffbe6", "stroke-width": 3, "stroke-linejoin": "round" });
+  fx.over.insertBefore(glow, fx.flash); fx.over.insertBefore(core, fx.flash);
+  fx.flash.setAttribute("opacity", ".55");
+  setTimeout(() => fx.flash?.setAttribute("opacity", ".1"), 70);
+  setTimeout(() => fx.flash?.setAttribute("opacity", ".4"), 140);
+  setTimeout(() => { fx.flash?.setAttribute("opacity", "0"); glow.remove(); core.remove(); }, 260);
+  for (const a of pen.animals) a.panicT = 0;
+}
+
+function updateDisasterMenu(pen) {
+  if (!pen.dMenu) return;
+  pen.dMenu.querySelector(".clear").hidden = !pen.fx;
+  pen.dBtn.classList.toggle("active", !!pen.fx);
+}
+
+function closeDisasterMenus(except) {
+  for (const p of pens.values()) if (p.dMenu && p.dMenu !== except) { p.dMenu.hidden = true; p.dBtn.setAttribute("aria-expanded", "false"); }
 }
 
 // ---------- Boot ----------
@@ -940,14 +1210,8 @@ async function boot() {
     el("span", { class: "plus", text: "＋" }), el("span", { text: "Add a pen" }));
   $("#pens").replaceChildren(...penList.pens.map(buildPen), addCard);
   $("#addPen").onclick = addPen;
-  $("#disasterBtn").onclick = (e) => {
-    e.stopPropagation();
-    const m = $("#disasterMenu");
-    m.hidden = !m.hidden;
-    $("#disasterBtn").setAttribute("aria-expanded", String(!m.hidden));
-  };
-  for (const b of document.querySelectorAll("#disasterMenu button")) b.onclick = () => disaster(b.dataset.d);
-  document.addEventListener("click", (e) => { if (!e.target.closest(".disaster-wrap")) $("#disasterMenu").hidden = true; });
+  // close any open pen disaster menu when clicking elsewhere
+  document.addEventListener("click", (e) => { if (!e.target.closest(".pen-disaster")) closeDisasterMenus(); });
   for (const pen of pens.values()) syncPen(pen); // names may be new to a restarted server
   requestAnimationFrame(animate);
 
@@ -956,6 +1220,7 @@ async function boot() {
   speed.oninput = () => { $("#speedOut").textContent = `${speed.value} s`; };
   $("#barnReset").onclick = async () => {
     setRunning(false);
+    for (const pen of pens.values()) if (pen.fx) stopFx(pen, true);
     await api("/reset", { method: "POST" });
     // Don't reset the shared chicken server: forget only this copy's pens there.
     if (online.chicken) await Promise.all([...pens.values()].filter((p) => p.heard).map((p) =>
