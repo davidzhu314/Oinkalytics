@@ -280,11 +280,41 @@ function addAnimal(pen, kind, walkIn) {
   n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
   pen.animals.push(a);
   updateHint(pen);
+  updateCounts(pen);
+  if (walkIn) { toast(`A new ${name} is walking into ${pen.name}.`); savePens(); }
+}
+
+/** "＋" shows how many of that animal are in the pen and stops at MAX_ANIMALS; "−" greys out at zero. */
+function updateCounts(pen) {
   for (const b of pen.addBtns) {
     b.disabled = pen.animals.length >= MAX_ANIMALS;
     b.dataset.n = pen.animals.filter((x) => x.kind === b.dataset.kind).length; // count badge
   }
-  if (walkIn) { toast(`A new ${name} is walking into ${pen.name}.`); savePens(); }
+  for (const b of pen.removeBtns || []) b.disabled = !pen.animals.some((x) => x.kind === b.dataset.kind);
+}
+
+/** Walk one animal of this kind out of the pen. In Mixed, pick the mood that keeps the pen near its share. */
+function removeAnimal(pen, kind) {
+  const same = pen.animals.filter((a) => a.kind === kind);
+  if (!same.length) return;
+  let pool = same;
+  if (pen.mode === "mixed") {
+    const stressed = pen.animals.filter((a) => a.mood === "distressed").length;
+    const over = stressed / pen.animals.length > MIXED_SHARE;
+    const pick = same.filter((a) => (a.mood === "distressed") === over);
+    if (pick.length) pool = pick;
+  }
+  const a = pool[Math.floor(Math.random() * pool.length)];
+  pen.animals.splice(pen.animals.indexOf(a), 1);
+  // It walks off the left edge, then disappears (drawn in its own layer so depth sorting ignores it).
+  a.leaving = true; a.rest = 0; a.tx = -60; a.ty = a.y;
+  pen.exitLayer.append(a.g);
+  a.g.removeAttribute("tabindex"); a.g.style.pointerEvents = "none";
+  pen.exiting.push(a);
+  updateHint(pen);
+  updateCounts(pen);
+  savePens();
+  toast(`A ${kind === "pig" ? "pig" : "hen"} is walking out of ${pen.name}.`);
 }
 
 /** Empty pens say how to start; once there are animals, how to hear one. */
@@ -352,6 +382,16 @@ function buildPen(spec) {
     b.onclick = () => addAnimal(pen, k, true);
     return b;
   });
+  const removeBtns = kinds.map((k) => {
+    const b = icon("−", `Walk a ${k === "pig" ? "pig" : "hen"} out of this pen`, `remove ${k}`);
+    b.dataset.kind = k;
+    b.disabled = true;
+    b.onclick = () => removeAnimal(pen, k);
+    return b;
+  });
+  const steppers = kinds.map((k, i) => el("span", { class: "stepper" }, removeBtns[i], addBtns[i]));
+  const exitLayer = el("g");
+  svg.append(exitLayer);
 
   const badge = el("span", { class: "badge idle", text: "○ Quiet" });
   const summary = el("div", { class: "pen-summary", text: "No calls yet." });
@@ -379,9 +419,9 @@ function buildPen(spec) {
       summary,
       el("div", { class: "pen-tools" },
         el("div", { class: "seg", role: "group", "aria-label": "What this pen's microphone hears" }, Object.values(modes)),
-        el("div", { class: "tools" }, addBtns, clips, listen))));
+        el("div", { class: "tools" }, steppers, clips, listen))));
 
-  const pen = { id, name: spec.name, kinds, card, svg, layer, animals, addBtns, hint, badge, summary, modes, mineBtn,
+  const pen = { id, name: spec.name, kinds, card, svg, layer, exitLayer, exiting: [], animals, addBtns, removeBtns, hint, badge, summary, modes, mineBtn,
     mode: spec.mode || "mixed", mine: [], mineIdx: 0, listen: false, level: "idle", levels: {}, last: {}, order: {} };
   penNames[id] = pen.name;
   penCreated[id] = spec.created || new Date().toISOString();
@@ -561,6 +601,18 @@ function animate(now) {
       a.g.classList.toggle("walking", walking);
       a.g.classList.toggle("stressed", s);
       a.emote.textContent = s ? "!" : ""; // steady, not blinking
+    }
+  }
+  // animals walking out: head for the left edge, then disappear
+  for (const pen of pens.values()) {
+    for (const a of [...pen.exiting]) {
+      a.x -= 130 * dt;
+      a.dir = -1;
+      a.bob += dt * 10;
+      a.g.setAttribute("transform", `translate(${a.x.toFixed(1)},${(a.y + Math.sin(a.bob) * 1.4).toFixed(1)})`);
+      a.flip.setAttribute("transform", "scale(-1,1)");
+      a.g.classList.add("walking");
+      if (a.x < -50) { a.g.remove(); pen.exiting.splice(pen.exiting.indexOf(a), 1); }
     }
   }
   // keep animals drawn in depth order

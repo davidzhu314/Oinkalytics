@@ -314,3 +314,9 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .add-pen-card:hover { border-color: var(--ink); color: var(--ink); background: #fbf8f1; }
 
 .pen.empty .field-hint { opacity: 1; left: 50%; bottom: 50%; transform: translate(-50%, 50%); font-size: 14px; padding: 6px 12px; white-space: nowrap; }
+
+/* − / ＋ animal stepper */
+.stepper { display: inline-flex; align-items: center; gap: 2px; }
+.ic.remove { min-width: 30px; height: 30px; padding: 0; font-size: 18px; font-weight: 700; line-height: 1; }
+.ic.remove.pig { background: #fde4ea; border-color: #f2a3b3; color: #7a3344; }
+.ic.remove.chicken { background: #fff3cf; border-color: #e8c46a; color: #6b4e00; }
