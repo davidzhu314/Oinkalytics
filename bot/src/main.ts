@@ -116,6 +116,22 @@ async function send(space: Space, replies: Reply[]) {
 
 const worse = escalator();
 
+// Safety net against spam: proactive messages (alerts, follow-ups, emergencies) share one budget.
+// Replies to the farmer's own texts don't count.
+const PUSH_MAX = 6, PUSH_WINDOW_MS = 10 * 60_000;
+const pushed: number[] = [];
+function mayPush(what: string): boolean {
+  const now = Date.now();
+  while (pushed.length && now - pushed[0] > PUSH_WINDOW_MS) pushed.shift();
+  if (pushed.length >= PUSH_MAX) { console.log(`[guard] ${PUSH_MAX} messages in 10 min already; not sending: ${what}`); return false; }
+  pushed.push(now);
+  return true;
+}
+// A pen with no new calls for 2 minutes (closed tab, stopped barn) keeps its last state forever on the
+// server; it must not trigger follow-ups or emergencies.
+const STALE_MS = 2 * 60_000;
+const fresh = (pen: { updated_at: string | null }) => !!pen.updated_at && Date.now() - Date.parse(pen.updated_at) < STALE_MS;
+
 const pollers = sources.map((src) =>
   alertPoller({
     oink: src.oink,
@@ -123,6 +139,7 @@ const pollers = sources.map((src) =>
     async deliver(a: Alert) {
       const space = await resolveFarmerSpace();
       if (!space) throw new Error("no farmer conversation yet");
+      if (!mayPush(`alert ${a.alert_id}`)) return;
       await space.send(alertText(src, a));
       worse.noted(`${src.name}:${a.pen_id}`, a);
       console.log(`[alerts] sent ${src.name} ${a.alert_id}: ${a.message}`);
@@ -144,13 +161,15 @@ const escalation = setInterval(async () => {
       continue;
     }
     for (const pen of pens) {
+      // Emergencies supersede the "getting worse" follow-up; stale pens get nothing.
+      if (!fresh(pen) || emergencyRecent.has(`${src.name}:${pen.pen_id}`)) continue;
       if (!worse.shouldEscalate(`${src.name}:${pen.pen_id}`, pen)) continue;
       if (state.muted) {
         console.log(`[alerts] muted, not sending: ${src.name} Pen ${pen.pen_id} critical`);
         continue;
       }
       const space = await resolveFarmerSpace();
-      if (space) await space.send(escalationText(src, pen)).catch((err) => console.error("[alerts] escalation failed:", err));
+      if (space && mayPush(`escalation ${pen.pen_id}`)) await space.send(escalationText(src, pen)).catch((err) => console.error("[alerts] escalation failed:", err));
       console.log(`[alerts] sent ${src.name} Pen ${pen.pen_id} escalation to critical`);
     }
   }
@@ -178,32 +197,51 @@ async function speech(text: string): Promise<Buffer | null> {
 
 const EMERGENCY_REPEAT_MS = 60_000;
 const EMERGENCY_MAX = 3;
-const incidents = new Map<string, { since: number; lastAt: number; sent: number }>(); // per species
+const EMERGENCY_QUIET_MS = 10 * 60_000; // after the last emergency message, a pen stays quiet this long
+// Per pen ("Pigs:L1-ab12"): when its emergency began, when we last messaged, how many times.
+const incidents = new Map<string, { since: number; lastAt: number; sent: number }>();
+const emergencyRecent = new Set<string>(); // pens in, or recently messaged about, an emergency
 let emergencyBusy = false;
 const emergencyLoop = setInterval(async () => {
   if (emergencyBusy) return;
   emergencyBusy = true;
   try {
+    const now = Date.now();
+    // forget pens whose last emergency message is old enough
+    for (const [key, inc] of incidents) if (inc.lastAt && now - inc.lastAt > EMERGENCY_QUIET_MS) incidents.delete(key);
+    emergencyRecent.clear();
+    for (const key of incidents.keys()) emergencyRecent.add(key);
     for (const src of sources) {
       let pens;
       try { pens = await src.oink.pens(); } catch { continue; }
-      const em = emergencyPens(pens);
-      if (!em.length) { incidents.delete(src.name); continue; } // calmed down: the next one is a new incident
-      const now = Date.now();
-      let inc = incidents.get(src.name);
-      if (!inc) incidents.set(src.name, (inc = { since: now, lastAt: 0, sent: 0 }));
-      if ((state.emergencyAckAt ?? 0) >= inc.since || inc.sent >= EMERGENCY_MAX || now - inc.lastAt < EMERGENCY_REPEAT_MS) continue;
-      const what = em.map((p) => p.name || `Pen ${p.pen_id}`).join(", ");
-      if (state.muted) { console.log(`[emergency] muted, not sending: ${src.name} ${what}`); inc.lastAt = now; continue; }
+      const em = emergencyPens(pens.filter(fresh));
+      const due = [];
+      for (const pen of em) {
+        const key = `${src.name}:${pen.pen_id}`;
+        emergencyRecent.add(key);
+        let inc = incidents.get(key);
+        if (!inc) incidents.set(key, (inc = { since: now, lastAt: 0, sent: 0 }));
+        const acked = (state.emergencyAckAt ?? 0) >= inc.since;
+        if (acked || inc.sent >= EMERGENCY_MAX || now - inc.lastAt < EMERGENCY_REPEAT_MS) continue;
+        due.push(pen);
+      }
+      if (!due.length) continue;
+      const what = due.map((p) => p.name || `Pen ${p.pen_id}`).join(", ");
+      if (state.muted) { console.log(`[emergency] muted, not sending: ${src.name} ${what}`); continue; }
       const space = await resolveFarmerSpace();
       if (!space) { console.error("[emergency] no farmer conversation yet"); continue; }
-      inc.lastAt = now;
-      inc.sent += 1;
-      await space.send(emergencyText(src, em)).catch((err) => console.error("[emergency] text failed:", err));
-      const audio = await speech(emergencySpeech(src, em));
+      if (!mayPush(`emergency ${what}`)) continue;
+      const counts = due.map((p) => {
+        const inc = incidents.get(`${src.name}:${p.pen_id}`)!;
+        inc.lastAt = now;
+        inc.sent += 1;
+        return inc.sent;
+      });
+      await space.send(emergencyText(src, due)).catch((err) => console.error("[emergency] text failed:", err));
+      const audio = await speech(emergencySpeech(src, due));
       if (audio) await space.send(voice(audio, { mimeType: "audio/mp4", name: "emergency.m4a" }))
         .catch((err) => console.error("[emergency] voice note failed:", err));
-      console.log(`[emergency] sent ${src.name} ${what} (${inc.sent}/${EMERGENCY_MAX}${audio ? ", with voice note" : ""})`);
+      console.log(`[emergency] sent ${src.name} ${what} (${Math.max(...counts)}/${EMERGENCY_MAX}${audio ? ", with voice note" : ""})`);
     }
   } finally {
     emergencyBusy = false;
