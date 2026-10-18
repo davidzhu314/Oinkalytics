@@ -2,6 +2,13 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 31: fewer texts, rarer emergencies (bot/src/commands.ts emergencyWatch, bot/src/main.ts)
+
+- **Message volume (farmer feedback: too many texts):** warnings that arrive within 15 s go out as **one bundled message**; each pen gets at most **one proactive text per 30 min**; the "getting worse" follow-up is **gone**; a hard cap of **4 messages per 15 min**. Tested: two pens in disaster for 2.5 min produced **2 messages** (one bundled warning, one emergency). The old rules sent 18 in a similar test.
+- **Emergency = sustained and severe**, not "the last 5 calls were bad" (an ordinary stressed pen does that). A pen is critical at 4+ of its last 5 calls distressed. Emergency when **one pen stays critical without a break for 2 min with 15+ new distress calls**, or **2+ different pens are critical together for 45 s** (pigs and hens in one pen count as one pen). Any non-critical reading resets that pen's clock; pens with no calls for 2 min are ignored.
+- **Emergency message:** 🚨 text plus a spoken voice note, then **at most one reminder after 10 min** if it's still going and nobody replied OK. An incident ends after 30 min without an emergency reading.
+- **Demo:** put a disaster in **two pens** and wait about 90 s for the emergency, or one pen for over 2 min. 22/22 bot tests pass.
+
 ## Hour 24: pen builder wired to the iMessage bot (pen names; additive API)
 
 - **New, additive:** `POST /pens/{pen_id}/name` (`{"name": "North barn"}`) and `POST /pens/{pen_id}/remove`. `PenStatus.name` and `Alert.pen_name` are new optional fields; alert messages and status summaries use the name when set. Names survive `/reset`. Nothing existing changed; the chicken server inherits it (restarted at ~22:50 to pick it up).

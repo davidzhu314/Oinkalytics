@@ -674,31 +674,45 @@ function animate(now) {
 const CRITICAL_AT = 4;
 const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Warning", critical: "🚨 Critical", idle: "○ Quiet", waiting: "○ Waiting" };
 const RANK = { idle: 0, calm: 1, watch: 2, alert: 3, critical: 4 };
-// Same rule as the bot (bot/src/commands.ts emergencyPens): a pen whose last 5 calls are all distress
-// calls, or 2+ pens critical at once. The bot sends a 🚨 text + spoken voice note; we show it here too.
+// Same rule as the bot (bot/src/commands.ts emergencyWatch): an emergency is sustained and severe. A pen is
+// critical when 4+ of its last 5 calls are distress calls; emergency = one pen critical without a break for
+// 2 minutes with 15+ new distress calls, or 2+ different pens critical at once for 45 s. The bot then sends a
+// 🚨 text + spoken voice note (one reminder at most); we show it here too.
+const EMERGENCY = { singleMs: 120_000, singleCalls: 15, multiPens: 2, multiMs: 45_000 };
 let emergencyNow = new Set();
-const emergencyIncidents = {}; // species -> true while an incident is ongoing
+const critState = new Map(); // "sp:penId" -> { since, calls, last }
+let emergencyOn = false;
 function checkEmergencies(states) {
-  const now = new Set();
+  const now = Date.now(), seen = new Set(), critical = [];
   for (const sp of Object.keys(SPECIES)) {
-    const mine = Object.values(states[sp] || {}).filter((s) => pens.has(s.pen_id));
-    const full = mine.filter((s) => s.window >= 5 && s.distressed === s.window);
-    const critical = mine.filter((s) => s.distressed >= CRITICAL_AT);
-    const em = critical.length >= 2 ? critical : full;
-    em.forEach((s) => now.add(s.pen_id));
-    if (em.length && !emergencyIncidents[sp]) {
-      emergencyIncidents[sp] = true;
-      const names = em.map((s) => penLabel(s.pen_id)).join(", ");
-      const msg = `🚨 EMERGENCY · ${SPECIES[sp].emoji} ${em.length > 1 ? `${em.length} pens at once: ${names}` : `${names}: every recent call is a distress call`}. ` +
-        "Check the pen now. Reply \"OK\" when you're on it.";
-      const li = el("li", { class: "sms emergency" }, el("time", { text: new Date().toLocaleTimeString() }), msg,
-        el("div", { class: "why", text: "🔊 Also sent as a spoken voice note, repeated every minute until the farmer replies OK." }));
-      $(".empty", $("#alertList"))?.remove();
-      $("#alertList").prepend(li);
-      toast(`🚨 Emergency voice message sent to the farmer: ${names}`);
-    } else if (!em.length) delete emergencyIncidents[sp];
+    for (const s of Object.values(states[sp] || {})) {
+      if (!pens.has(s.pen_id)) continue;
+      const key = `${sp}:${s.pen_id}`;
+      seen.add(key);
+      if (!(s.window >= 5 && s.distressed >= CRITICAL_AT)) { critState.delete(key); continue; }
+      let c = critState.get(key);
+      if (!c) critState.set(key, (c = { since: now, calls: 0, last: s.last_prediction_id }));
+      else if (s.last_prediction_id !== c.last) { c.calls += 1; c.last = s.last_prediction_id; }
+      critical.push({ sp, id: s.pen_id, ...c });
+    }
   }
-  emergencyNow = now;
+  for (const k of [...critState.keys()]) if (!seen.has(k)) critState.delete(k);
+  const wide = critical.filter((c) => now - c.since >= EMERGENCY.multiMs);
+  const em = new Set(wide.map((c) => c.id)).size >= EMERGENCY.multiPens ? wide
+    : critical.filter((c) => now - c.since >= EMERGENCY.singleMs && c.calls >= EMERGENCY.singleCalls);
+  emergencyNow = new Set(em.map((c) => c.id));
+  if (em.length && !emergencyOn) {
+    emergencyOn = true;
+    const ids = [...emergencyNow], names = ids.map(penLabel).join(", ");
+    const msg = ids.length > 1
+      ? `🚨 EMERGENCY · ${ids.length} pens have been in severe distress at the same time: ${names}. Please check the barn now.`
+      : `🚨 EMERGENCY · ${names} has been in severe, non-stop distress for over 2 minutes. Please check the pen now.`;
+    const li = el("li", { class: "sms emergency" }, el("time", { text: new Date().toLocaleTimeString() }), msg + ' Reply "OK" when you\'re on it.',
+      el("div", { class: "why", text: "🔊 Also sent as a spoken voice note. One reminder after 10 minutes if nobody replies OK." }));
+    $(".empty", $("#alertList"))?.remove();
+    $("#alertList").prepend(li);
+    toast(`🚨 Emergency voice message sent to the farmer: ${names}`);
+  } else if (!em.length) emergencyOn = false;
 }
 
 async function pollPens() {

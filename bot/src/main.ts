@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Spectrum, attachment, voice, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { alertText, emergencyPens, emergencySpeech, emergencyText, escalationText, escalator, handle, type BotState, type Reply, type Source } from "./commands.ts";
+import { digestText, emergencySpeech, emergencyText, emergencyWatch, handle, penTitle, type BotState, type Reply, type Source, type Watched } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
 import { classify, onceEvery, rateLimiter } from "./guard.ts";
 
@@ -114,35 +114,57 @@ async function send(space: Space, replies: Reply[]) {
   }
 }
 
-const worse = escalator();
-
-// Safety net against spam: proactive messages (alerts, follow-ups, emergencies) share one budget.
-// Replies to the farmer's own texts don't count.
-const PUSH_MAX = 6, PUSH_WINDOW_MS = 10 * 60_000;
+// ---------- What the farmer gets ----------
+// Kept deliberately quiet: warnings that arrive together are bundled into one message, each pen texts at
+// most once per 30 minutes, there are no "getting worse" follow-ups, emergencies are rare (sustained and
+// severe, see emergencyWatch) with at most one reminder, and everything shares a hard cap.
+const PUSH_MAX = 4, PUSH_WINDOW_MS = 15 * 60_000;
 const pushed: number[] = [];
 function mayPush(what: string): boolean {
   const now = Date.now();
   while (pushed.length && now - pushed[0] > PUSH_WINDOW_MS) pushed.shift();
-  if (pushed.length >= PUSH_MAX) { console.log(`[guard] ${PUSH_MAX} messages in 10 min already; not sending: ${what}`); return false; }
+  if (pushed.length >= PUSH_MAX) { console.log(`[guard] ${PUSH_MAX} messages in 15 min already; not sending: ${what}`); return false; }
   pushed.push(now);
   return true;
 }
 // A pen with no new calls for 2 minutes (closed tab, stopped barn) keeps its last state forever on the
-// server; it must not trigger follow-ups or emergencies.
+// server; it must not count toward an emergency.
 const STALE_MS = 2 * 60_000;
 const fresh = (pen: { updated_at: string | null }) => !!pen.updated_at && Date.now() - Date.parse(pen.updated_at) < STALE_MS;
+
+const PEN_QUIET_MS = 30 * 60_000;            // after texting about a pen, leave it alone this long
+const BUNDLE_MS = 15_000;                     // warnings within this window go out together
+const penTexted = new Map<string, number>();  // pen_id -> last proactive message (any species)
+const bundle: { src: Source; alert: Alert }[] = [];
+let bundleTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function flushBundle() {
+  bundleTimer = undefined;
+  const items = bundle.splice(0);
+  if (!items.length || state.muted) return;
+  const names = items.map((x) => penTitle(x.alert.pen_id, x.alert.pen_name)).join(", ");
+  const space = await resolveFarmerSpace();
+  if (!space) { console.error("[alerts] no farmer conversation yet; dropped:", names); return; }
+  if (!mayPush(`warning ${names}`)) return;
+  await space.send(digestText(items)).catch((err) => console.error("[alerts] send failed:", err));
+  const now = Date.now();
+  for (const x of items) penTexted.set(x.alert.pen_id, now);
+  console.log(`[alerts] sent ${items.length} warning(s): ${names}`);
+}
 
 const pollers = sources.map((src) =>
   alertPoller({
     oink: src.oink,
     state,
     async deliver(a: Alert) {
-      const space = await resolveFarmerSpace();
-      if (!space) throw new Error("no farmer conversation yet");
-      if (!mayPush(`alert ${a.alert_id}`)) return;
-      await space.send(alertText(src, a));
-      worse.noted(`${src.name}:${a.pen_id}`, a);
-      console.log(`[alerts] sent ${src.name} ${a.alert_id}: ${a.message}`);
+      const last = penTexted.get(a.pen_id);
+      if (last && Date.now() - last < PEN_QUIET_MS) {
+        console.log(`[alerts] ${penTitle(a.pen_id, a.pen_name)} already texted in the last 30 min; not sending again`);
+        return;
+      }
+      if (bundle.some((x) => x.alert.pen_id === a.pen_id)) return; // pigs and hens in one pen: one line
+      bundle.push({ src, alert: a });
+      bundleTimer ??= setTimeout(flushBundle, BUNDLE_MS);
     },
   }),
 );
@@ -151,34 +173,10 @@ console.log(`[bot] channel=${CHANNEL} api=${API} chicken_api=${CHICKEN_API ?? "o
 await restoreSpace();
 await Promise.all(pollers.map((p) => p.start()));
 
-// A warned pen that gets worse within 10 minutes gets one "critical" follow-up.
-const escalation = setInterval(async () => {
-  for (const src of sources) {
-    let pens;
-    try {
-      pens = await src.oink.pens();
-    } catch {
-      continue;
-    }
-    for (const pen of pens) {
-      // Emergencies supersede the "getting worse" follow-up; stale pens get nothing.
-      if (!fresh(pen) || emergencyRecent.has(`${src.name}:${pen.pen_id}`)) continue;
-      if (!worse.shouldEscalate(`${src.name}:${pen.pen_id}`, pen)) continue;
-      if (state.muted) {
-        console.log(`[alerts] muted, not sending: ${src.name} Pen ${pen.pen_id} critical`);
-        continue;
-      }
-      const space = await resolveFarmerSpace();
-      if (space && mayPush(`escalation ${pen.pen_id}`)) await space.send(escalationText(src, pen)).catch((err) => console.error("[alerts] escalation failed:", err));
-      console.log(`[alerts] sent ${src.name} Pen ${pen.pen_id} escalation to critical`);
-    }
-  }
-}, 3000);
-
-// ---------- Emergencies ----------
-// A pen whose last 5 calls are all distress calls, or 2+ pens critical at once: a 🚨 text plus a spoken
-// voice note (macOS text-to-speech), repeated every minute up to 3 times until the farmer replies "OK".
-// Photon's shared iMessage line can't place phone calls; a voice note is the loudest thing it can send.
+// ---------- Emergencies (rare) ----------
+// A 🚨 text plus a spoken voice note (macOS text-to-speech), then at most one reminder after 10 minutes
+// if it's still going and nobody replied "OK". Photon's shared iMessage line can't place phone calls; a
+// voice note is the loudest thing it can send. Emergencies don't count against the message cap above.
 const run = promisify(execFile);
 async function speech(text: string): Promise<Buffer | null> {
   if (process.platform !== "darwin") return null;
@@ -195,54 +193,42 @@ async function speech(text: string): Promise<Buffer | null> {
   }
 }
 
-const EMERGENCY_REPEAT_MS = 60_000;
-const EMERGENCY_MAX = 3;
-const EMERGENCY_QUIET_MS = 10 * 60_000; // after the last emergency message, a pen stays quiet this long
-// Per pen ("Pigs:L1-ab12"): when its emergency began, when we last messaged, how many times.
-const incidents = new Map<string, { since: number; lastAt: number; sent: number }>();
-const emergencyRecent = new Set<string>(); // pens in, or recently messaged about, an emergency
+const EMERGENCY_REMIND_MS = 10 * 60_000;
+const EMERGENCY_QUIET_MS = 30 * 60_000; // an incident ends after 30 min without an emergency reading
+const watch = emergencyWatch();
+let incident: { since: number; lastAt: number; sent: number; seenAt: number } | null = null;
 let emergencyBusy = false;
 const emergencyLoop = setInterval(async () => {
   if (emergencyBusy) return;
   emergencyBusy = true;
   try {
-    const now = Date.now();
-    // forget pens whose last emergency message is old enough
-    for (const [key, inc] of incidents) if (inc.lastAt && now - inc.lastAt > EMERGENCY_QUIET_MS) incidents.delete(key);
-    emergencyRecent.clear();
-    for (const key of incidents.keys()) emergencyRecent.add(key);
+    const watched: Watched[] = [];
     for (const src of sources) {
-      let pens;
-      try { pens = await src.oink.pens(); } catch { continue; }
-      const em = emergencyPens(pens.filter(fresh));
-      const due = [];
-      for (const pen of em) {
-        const key = `${src.name}:${pen.pen_id}`;
-        emergencyRecent.add(key);
-        let inc = incidents.get(key);
-        if (!inc) incidents.set(key, (inc = { since: now, lastAt: 0, sent: 0 }));
-        const acked = (state.emergencyAckAt ?? 0) >= inc.since;
-        if (acked || inc.sent >= EMERGENCY_MAX || now - inc.lastAt < EMERGENCY_REPEAT_MS) continue;
-        due.push(pen);
-      }
-      if (!due.length) continue;
-      const what = due.map((p) => p.name || `Pen ${p.pen_id}`).join(", ");
-      if (state.muted) { console.log(`[emergency] muted, not sending: ${src.name} ${what}`); continue; }
-      const space = await resolveFarmerSpace();
-      if (!space) { console.error("[emergency] no farmer conversation yet"); continue; }
-      if (!mayPush(`emergency ${what}`)) continue;
-      const counts = due.map((p) => {
-        const inc = incidents.get(`${src.name}:${p.pen_id}`)!;
-        inc.lastAt = now;
-        inc.sent += 1;
-        return inc.sent;
-      });
-      await space.send(emergencyText(src, due)).catch((err) => console.error("[emergency] text failed:", err));
-      const audio = await speech(emergencySpeech(src, due));
-      if (audio) await space.send(voice(audio, { mimeType: "audio/mp4", name: "emergency.m4a" }))
-        .catch((err) => console.error("[emergency] voice note failed:", err));
-      console.log(`[emergency] sent ${src.name} ${what} (${Math.max(...counts)}/${EMERGENCY_MAX}${audio ? ", with voice note" : ""})`);
+      try {
+        for (const pen of (await src.oink.pens()).filter(fresh)) watched.push({ key: `${src.name}:${pen.pen_id}`, src, pen });
+      } catch { /* that model is down */ }
     }
+    const now = Date.now();
+    const em = watch.update(watched, now);
+    if (incident && now - incident.seenAt > EMERGENCY_QUIET_MS) incident = null;
+    if (!em.length) return;
+    if (!incident) incident = { since: now, lastAt: 0, sent: 0, seenAt: now };
+    incident.seenAt = now;
+    const acked = (state.emergencyAckAt ?? 0) >= incident.since;
+    if (acked || incident.sent >= 2 || (incident.sent === 1 && now - incident.lastAt < EMERGENCY_REMIND_MS)) return;
+    const what = em.map((w) => penTitle(w.pen.pen_id, w.pen.name)).join(", ");
+    if (state.muted) { console.log(`[emergency] muted, not sending: ${what}`); return; }
+    const space = await resolveFarmerSpace();
+    if (!space) { console.error("[emergency] no farmer conversation yet"); return; }
+    incident.sent += 1;
+    incident.lastAt = now;
+    const reminder = incident.sent > 1;
+    await space.send((reminder ? "Reminder: " : "") + emergencyText(em)).catch((err) => console.error("[emergency] text failed:", err));
+    const audio = reminder ? null : await speech(emergencySpeech(em));
+    if (audio) await space.send(voice(audio, { mimeType: "audio/mp4", name: "emergency.m4a" }))
+      .catch((err) => console.error("[emergency] voice note failed:", err));
+    for (const w of em) penTexted.set(w.pen.pen_id, now);
+    console.log(`[emergency] sent${reminder ? " reminder" : ""}: ${what}${audio ? " (with voice note)" : ""}`);
   } finally {
     emergencyBusy = false;
   }
@@ -250,7 +236,6 @@ const emergencyLoop = setInterval(async () => {
 
 const shutdown = async () => {
   for (const p of pollers) p.stop();
-  clearInterval(escalation);
   clearInterval(emergencyLoop);
   await app.stop();
   process.exit(0);

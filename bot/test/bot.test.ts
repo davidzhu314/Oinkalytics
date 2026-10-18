@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alertText, emergencyPens, emergencySpeech, emergencyText, escalationText, escalator, handle, parse, penOf, severity, type BotState, type Source } from "../src/commands.ts";
+import { alertText, digestText, emergencySpeech, emergencyText, emergencyWatch, escalationText, escalator, handle, parse, penOf, severity, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
 import { classify, onceEvery, rateLimiter } from "../src/guard.ts";
 import type { Alert, Oink } from "../src/oink.ts";
@@ -290,19 +290,50 @@ test("a warned pen that gets worse gets one critical follow-up, within 10 minute
 });
 
 
-test("emergency: a pen with 5 of 5 distress calls, or 2+ critical pens at once", () => {
-  const pen = (id: string, distressed: number, window = 5, name: string | null = null) =>
-    ({ pen_id: id, name, level: "alert" as const, window, distressed, last_prediction_id: null, updated_at: null, summary: "" });
-  assert.deepEqual(emergencyPens([pen("1", 4), pen("2", 1)]), []);                 // one critical pen: not yet
-  assert.deepEqual(emergencyPens([pen("1", 5), pen("2", 1)]).map((p) => p.pen_id), ["1"]); // all 5 distressed
-  assert.deepEqual(emergencyPens([pen("1", 4, 4)]), []);                            // window not full yet
-  assert.deepEqual(emergencyPens([pen("1", 4), pen("2", 4), pen("3", 0)]).map((p) => p.pen_id), ["1", "2"]); // barn-wide
+test("emergency only for sustained, severe distress, not an ordinary stressed pen", () => {
   const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
-  const one = [pen("L1-a", 5, 5, "North barn")];
-  assert.match(emergencyText(pig, one), /^🚨 EMERGENCY · 🐷 North barn: every one of the last 5 calls is a distress call\./);
-  assert.match(emergencyText(pig, one), /Reply "OK" when you're on it\.$/);
-  assert.match(emergencyText(pig, [pen("1", 4), pen("2", 4, 5, "South")]), /2 pens sound stressed at once: Pen 1, South\./);
-  assert.equal(emergencySpeech(pig, one), "Emergency at North barn. Every recent call from the pigs is a distress call. Please check the pen now.");
+  const hen: Source = { name: "Chickens", emoji: "🐔", bad: "sick", noun: "hen", match: /chicken/, oink: fakeOink() };
+  const pen = (id: string, distressed: number, last: string, name: string | null = null) =>
+    ({ pen_id: id, name, level: "alert" as const, window: 5, distressed, last_prediction_id: last, updated_at: null, summary: "" });
+  const w = (src: Source, p: ReturnType<typeof pen>) => ({ key: `${src.name}:${p.pen_id}`, src, pen: p });
+  // one pen, 5 of 5 distressed: an ordinary stressed pen, not an emergency yet
+  let watch = emergencyWatch();
+  assert.deepEqual(watch.update([w(pig, pen("1", 5, "p0"))], 0), []);
+  // still critical after 2 minutes but only a few new calls: not enough evidence
+  for (let t = 1; t <= 5; t++) watch.update([w(pig, pen("1", 5, `p${t}`))], t * 1000);
+  assert.deepEqual(watch.update([w(pig, pen("1", 5, "p5"))], 121_000), []);
+  // 2+ minutes of non-stop severe distress with 15+ new distress calls: emergency
+  watch = emergencyWatch();
+  for (let t = 0; t <= 20; t++) watch.update([w(pig, pen("1", 5, `q${t}`))], t * 6000);
+  assert.deepEqual(watch.update([w(pig, pen("1", 5, "q21"))], 126_000).map((x) => x.pen.pen_id), ["1"]);
+  // one calm reading resets the clock
+  watch = emergencyWatch();
+  for (let t = 0; t <= 20; t++) watch.update([w(pig, pen("1", t === 10 ? 2 : 5, `r${t}`))], t * 6000);
+  assert.deepEqual(watch.update([w(pig, pen("1", 5, "r21"))], 126_000), []);
+  // two different pens critical together for 45 s: barn-wide emergency
+  watch = emergencyWatch();
+  watch.update([w(pig, pen("1", 4, "a")), w(pig, pen("2", 4, "b"))], 0);
+  assert.deepEqual(watch.update([w(pig, pen("1", 4, "a")), w(pig, pen("2", 4, "b"))], 30_000), []);
+  assert.deepEqual(watch.update([w(pig, pen("1", 4, "a")), w(pig, pen("2", 4, "b"))], 46_000).map((x) => x.pen.pen_id), ["1", "2"]);
+  // pigs and hens in the SAME pen are one pen, not a barn-wide incident
+  watch = emergencyWatch();
+  watch.update([w(pig, pen("1", 4, "a")), w(hen, pen("1", 4, "b"))], 0);
+  assert.deepEqual(watch.update([w(pig, pen("1", 4, "a")), w(hen, pen("1", 4, "b"))], 60_000), []);
+  // wording
+  const one = [w(pig, pen("L1-a", 5, "x", "North barn"))];
+  assert.match(emergencyText(one), /^🚨 EMERGENCY · 🐷 North barn has been in severe, non-stop distress for over 2 minutes\./);
+  assert.match(emergencyText(one), /Reply "OK" when you're on it\.$/);
+  assert.match(emergencyText([w(pig, pen("1", 4, "a")), w(hen, pen("2", 4, "b", "Hen house"))]), /2 pens have been in severe distress at the same time: 🐷 Pen 1, 🐔 Hen house\./);
+  assert.equal(emergencySpeech(one), "Emergency at North barn. The animals have been in severe distress for over two minutes. Please check the pen now.");
+});
+
+test("warnings that arrive together go out as one message", () => {
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
+  const hen: Source = { name: "Chickens", emoji: "🐔", bad: "sick", noun: "hen", match: /chicken/, oink: fakeOink() };
+  const a1 = { ...alert("a1", "L1-x"), pen_name: "North barn" }, a2 = { ...alert("a2", "L2-y"), pen_name: "Hen house" };
+  const text = digestText([{ src: pig, alert: a1 }, { src: hen, alert: a2 }]);
+  assert.match(text, /^⚠️ Warning · 2 pens need a look:\n• 🐷 North barn sounds stressed \(3 of the last 5 calls\)\n• 🐔 Hen house sounds sick/);
+  assert.equal(digestText([{ src: pig, alert: a1 }]), alertText(pig, a1)); // a single warning reads as before
 });
 
 test("'OK' acknowledges an emergency; longer messages keep their meaning", async () => {
