@@ -5,27 +5,29 @@ For the team. Every number here is in [docs/slides/numbers.csv](slides/numbers.c
 ## Before judges arrive (checklist)
 
 - [ ] Laptop plugged in, lid open, phone hotspot ready.
-- [ ] API running (`uvicorn api.server:app --port 8000`), `GET /health` says `"mode":"real"`.
-- [ ] Dashboard open on the ASUS monitor (http://localhost:7860), **Barn** tab, browser zoomed so pens read from across the table.
-- [ ] Bot running (`cd bot && npm run dev`), log shows `channel=imessage`.
-- [ ] **Demo phone has texted the bot "status" since the bot last started**, otherwise the alert can't reach it.
-- [ ] Press **Reset barn**. Set **Seconds between calls** to **0.5**. Ramp **off**.
-- [ ] Phone volume up, not on silent, so "play it" is audible.
+- [ ] **Pen-builder API:** `PENS="" HUB_WEB=web_lab .venv/bin/uvicorn api.server:app --host 0.0.0.0 --port 8010` (`/health` says `"mode":"real"`).
+- [ ] **Chicken model:** `.venv/bin/uvicorn api.chicken_server:app --port 8002`.
+- [ ] **Bot:** `cd bot && OINK_API=http://localhost:8010 CHICKEN_API=http://localhost:8002 npm run dev`; the log shows `channel=imessage` and "restored the farmer's conversation". If not, text the bot "status" from the demo phone once.
+- [ ] **Only one pen-builder tab open** (http://localhost:8010) on the ASUS monitor, zoomed so pens read from across the table. The bot sees every pen from every tab.
+- [ ] Press **Reset**. Build three pens beforehand: **North barn** (3 pigs), **South barn** (3 pigs), **Hen house** (2 hens, 1 pig), all on **Mixed**. Speed **0.5 s**.
+- [ ] Phone volume up, not on silent (for "play it" and the emergency voice note).
 - [ ] The backup video is on the laptop desktop.
 
-## Demo script (~2 minutes)
+## Demo script (~2.5 minutes)
 
 | # | Who does what | Say (roughly) |
 |---|---|---|
-| 1 | Press **Start**. All pens green. | "This is a barn with four pens. Every few seconds a microphone hears a pig call. These are real recordings, held out: the model has never heard them." |
-| 2 | Tick **Ramp up distress in Pen 3**. Wait for it to go amber, then red (~30–60 s). | "Now Pen 3 starts sounding stressed. It doesn't alert on one call. It waits until 3 of the last 5 calls it's confident about sound distressed, so one squeal doesn't wake the farmer." |
-| 3 | Phone buzzes. Hold it up. | "And the farmer gets a text, where they already are: their messages." |
-| 4 | Text **why**. Read the reply aloud. | "Every number in that answer was measured from the audio. The AI can't add anything that isn't in the evidence; if it tries, we fall back to a template." |
-| 5 | Text **play it**. Let the call play. | "That's the actual call that triggered it." |
-| 6 | Switch to **Check a call**, pick the **clap** example, press **Check this call**. | "And when it hears something that isn't a pig, it says so: 'I'm not sure this is a pig call.' Knowing what it doesn't know is the point." |
-| 7 | Cut to the gap slide. | "And here's the part most demos hide…" (slide 4) |
+| 1 | Press **Start the barn**. | "This is a barn with three pens. One microphone per pen hears every call. These are real recordings the model has never heard." |
+| 2 | Click a pig with a **!** over it. | "This pig is stressed. That's its real call. The bubble is what our model heard, with its confidence. It's allowed to say 'not sure'." |
+| 3 | Set **South barn** to **Stressed**. Phone buzzes (~30 s). | "One stressed pen gets one text, not twenty. Warnings that arrive together are bundled, and a pen texts at most every half hour." |
+| 4 | Text **why**, then **play it**. | "Every number in that answer was measured from the audio, and that's the actual call." |
+| 5 | **⚠️ → Wolf attack** in North barn, **⚠️ → Fire** in Hen house. | "Now a real emergency: a wolf in one pen, a fire in another. The animals panic, and the model still judges every call itself." |
+| 6 | Wait ~90 s (talk through the honesty slide). Phone gets **🚨 EMERGENCY** plus a **voice note**. Play it. Reply **OK**. | "Emergencies are rare by design: sustained, severe distress, or several pens at once. Photon delivers a spoken voice note, and 'OK' stops it." |
+| 7 | Scroll to **Hear it think**, play the **clap**. | "And when it hears something that isn't a pig, it says so. Knowing what it doesn't know is the point." |
 
-**If Pen 3 is slow to turn red,** keep talking about step 2. The honest model says "not sure" on many distressed calls, which is a feature, not a bug. **Don't** switch to hand-picked clips. **If Wi-Fi drops,** play the backup video from step 1.
+**Faster emergency:** press **🚨 Distress all pens** instead of step 5. When every pen is in distress for 20 s, the whole-barn emergency fires (about 70 s in testing).
+**If a pen is slow to turn red,** keep talking. The honest model says "not sure" on some distressed calls. **Don't** switch to hand-picked clips.
+**If Wi-Fi drops,** play the backup video.
 
 ## Slides (7–8, about 3 minutes with the demo)
 
