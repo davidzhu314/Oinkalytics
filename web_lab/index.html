@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oinkalytics · Pen builder</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23f2a3b3'/%3E%3Cellipse cx='16' cy='19' rx='8' ry='6' fill='%23e07b93'/%3E%3Ccircle cx='13' cy='19' r='1.6' fill='%237a3344'/%3E%3Ccircle cx='19' cy='19' r='1.6' fill='%237a3344'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#barn">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="var(--pig)"/><ellipse cx="16" cy="19" rx="8" ry="6" fill="var(--pig-dark)"/><circle cx="13" cy="19" r="1.6" fill="var(--pig-ink)"/><circle cx="19" cy="19" r="1.6" fill="var(--pig-ink)"/></svg>
+      Oinkalytics
+    </a>
+    <nav>
+      <a href="#barn">Barn</a>
+      <a href="#think">Hear it think</a>
+      <a href="#try">Try your own</a>
+      <a href="#tested">How we tested</a>
+      <a href="colony.html">Bat colony</a>
+    </nav>
+    <span id="health" class="health">Connecting…</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>We taught AI to hear when pigs are stressed.</h1>
+      <p>It listens to every call in the barn and answers calm, distressed or "I'm not sure", then texts the farmer when a pen starts to sound wrong. We only score it on recordings it has <em>never heard</em>.</p>
+    </section>
+
+    <!-- BARN -->
+    <section id="barn" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Your barn</h2>
+          <p class="sub">Build your own barn: add and remove pens, click a pen's name to rename it, walk pigs and hens in, and pick what each pen's microphone hears (mixed, calm, stressed or your own files).</p>
+          <p class="sub small">One microphone hears the whole pen, not individual animals: it counts <b>calls</b>, so a pig calling five times counts five times, and alerts say "check the pen", not "pig #12". The animals here are an illustration of who might be calling.</p>
+        </div>
+        <div class="controls">
+          <button id="barnToggle" class="btn primary">▶ Start the barn</button>
+          <label class="speed">Every <input id="speed" type="range" min="0.5" max="5" step="0.5" value="1"> <output id="speedOut">1 s</output></label>
+          <button id="addPen" class="btn">＋ Add a pen</button>
+          <button id="barnReset" class="btn ghost">Reset</button>
+        </div>
+      </div>
+
+      <div class="barn-layout">
+        <div id="pens" class="pens"></div>
+        <aside class="alerts">
+          <h3>📱 Texts to the farmer</h3>
+          <p class="sub small">What the Photon bot sends. Reply "why?" or "play it", or use the buttons.</p>
+          <ol id="alertList" class="alert-list"><li class="empty">No alerts yet. All quiet.</li></ol>
+        </aside>
+      </div>
+    </section>
+
+    <!-- HEAR IT THINK -->
+    <section id="think" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Hear it think</h2>
+          <p class="sub">Three sounds, picked in advance from recordings the model never trained on. Press play to hear each one out loud, then watch the AI explain its verdict using only what it measured.</p>
+        </div>
+        <div class="controls"><button id="runAll" class="btn primary">▶ Play all three</button></div>
+      </div>
+      <div id="showcase" class="cases"></div>
+    </section>
+
+    <!-- TRY YOUR OWN -->
+    <section id="try" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Try your own</h2>
+          <p class="sub">Upload a voice memo, MP4 or audio file, or record one here. Anything that isn't a pig should come back as "I'm not sure".</p>
+        </div>
+      </div>
+      <div class="try-grid">
+        <div class="drop" id="tryDrop">
+          <p><strong>Drop a file here</strong><br><span class="sub small">wav, m4a, mp3, mp4, mov</span></p>
+          <div class="row">
+            <label class="btn">Choose file<input id="tryFile" type="file" accept="audio/*,video/*,.m4a,.mp4,.mov,.caf" hidden></label>
+            <button id="tryRec" class="btn">● Record</button>
+          </div>
+          <p id="tryStatus" class="sub small"></p>
+        </div>
+        <div id="tryResult" class="case result-only"><p class="sub">Your result shows up here.</p></div>
+      </div>
+    </section>
+
+    <!-- HOW WE TESTED -->
+    <section id="tested" class="section">
+      <div class="section-head">
+        <div>
+          <h2>How we tested</h2>
+          <p class="sub">Most demos test on a random shuffle of calls, so the model has already heard the same room and microphone. We test on recordings it has never heard, and report that number.</p>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>90%</b><span>random split (the usual way)</span></div>
+        <div class="stat hl"><b>67%</b><span>recordings it never heard</span></div>
+        <div class="stat"><b>75%</b><span>when it's allowed to say "not sure"</span></div>
+        <div class="stat"><b>86%</b><span>pigs it never heard, within one study</span></div>
+      </div>
+      <div class="charts">
+        <figure><img src="slides/1_gap.png" alt="Balanced accuracy: 90% on a random split, 67% on recordings it never heard, 61% on labs it never heard; chance is 50%."></figure>
+        <figure><img src="slides/2_calibration.png" alt="Calibration: when the model says 80% confident it is right about 80% of the time."></figure>
+        <figure><img src="slides/3_confidence.png" alt="Answering every call scores 67%; saying not sure on 36% of calls scores 75% on the rest."></figure>
+      </div>
+      <p class="sub small">Balanced accuracy, where guessing scores 50%. Data: SoundWel (Briefer et al. 2022, CC BY 4.0). Model: Perch 2.0 embeddings + calibrated logistic regression. Not yet tested in a noisy real barn.</p>
+
+      <h3 class="subhead">Then we added farm noise</h3>
+      <p class="sub">Will it work on a real farm? We mixed every held-out pig call with background noise recorded on a working farm, louder and louder, and ran each mix through the whole system. The first model got less accurate without getting more careful, and kept raising false alarms. So we retrained it with half the noise recordings mixed in and tested it on the other half, which it had never heard.</p>
+      <div class="stats">
+        <div class="stat"><b>31% → 14%</b><span>calm pigs wrongly flagged, in noise louder than the call</span></div>
+        <div class="stat hl"><b>57% → 66%</b><span>accuracy on the calls it answers, same noise</span></div>
+        <div class="stat"><b>43% → 32%</b><span>calls it answers there: it says "not sure" more</span></div>
+        <div class="stat"><b>67.5%</b><span>clean recordings it never heard: unchanged</span></div>
+      </div>
+      <div class="charts" style="grid-template-columns: minmax(0, 1fr); max-width: 980px;">
+        <figure><img src="slides/6_noise.png" alt="Before vs after training with farm noise. In noise louder than the call, accuracy on answered calls rises from 57% to 66% and calm pigs wrongly flagged fall from 31% to 14%; with no noise both models score about the same."></figure>
+      </div>
+      <p class="sub">What we learned: light noise barely matters. In heavy noise the retrained model stops crying wolf: it says "not sure" more often and halves the false alarms. With no noise the two models are within the margin of error. This is added noise, not a real barn yet; that's the next test.</p>
+      <p class="sub small">226 held-out calls. Noise: Bowen University "Poultry Vocalization Signal Dataset for Early Disease Detection" (Mendeley, CC BY 4.0), recorded on a poultry farm in Nigeria, not a pig barn. Added noise only, not barn echo or distance.</p>
+
+      <h3 class="subhead">Then we tried chickens, and caught the model cheating</h3>
+      <p class="sub">Same pipeline, a second species: healthy vs sick chickens. It scored 99.6% on recordings it had never heard. We didn't believe it, so we checked what else could explain it.</p>
+      <div class="stats">
+        <div class="stat"><b>99.6%</b><span>chicken recordings it never heard</span></div>
+        <div class="stat hl"><b>0.1</b><span>points lost on unseen recordings (pigs lose 23)</span></div>
+        <div class="stat"><b>93.9%</b><span>from 7 simple loudness and noise numbers, no AI</span></div>
+        <div class="stat"><b>81.5%</b><span>from loudness alone</span></div>
+      </div>
+      <div class="charts two">
+        <figure><img src="slides/4_chicken_gap.png" alt="Balanced accuracy. Pigs: 90.3% on a random split, 67.5% on recordings never heard, 22.8 points lost. Chickens: 99.7% and 99.6%, 0.1 points lost."></figure>
+        <figure><img src="slides/5_chicken_features.png" alt="Healthy vs sick chickens on recordings never heard: Perch model 99.6%, all 7 simple features 93.9%, mid-band energy 82.5%, zero-crossing rate 81.9%, loudness 81.5%, peak level 74.0%; coin flip 50%."></figure>
+      </div>
+      <p class="sub">So what is it hearing? Either each folder was recorded with a different microphone or room, or sick birds really do sound different (rattly, laboured breathing shifts the sound in exactly this way). The dataset has no recording details, so nothing can tell those apart. We report it as a confound, not as a 99.6% disease detector: the pipeline moved to a new species in a few hours, and the first thing it did was expose a shortcut a quick read would have published.</p>
+      <p class="sub small">Data: Mendeley "Poultry Vocalization Signal Dataset for Early Disease Detection" (346 recordings, CC BY 4.0). Simple features and model scored on the same split, holding out whole recordings.</p>
+
+      <h3 class="subhead">Does each model know its own animal?</h3>
+      <p class="sub">The mixed pens send every call to both models, and a call only counts for the model that recognises its own animal.</p>
+      <div class="table-wrap">
+        <table class="results">
+          <thead><tr><th>Sounds (held out)</th><th>Played to</th><th>Rejected as "not my animal"</th></tr></thead>
+          <tbody>
+            <tr><td>Pig calls</td><td>Chicken model</td><td><b>20 of 20</b></td></tr>
+            <tr><td>Everyday sounds (ESC-50, no birds or pigs)</td><td>Chicken model</td><td><b>12 of 12</b></td></tr>
+            <tr><td>Healthy chicken recordings (6–8 s)</td><td>Pig model</td><td><b>6 of 6</b></td></tr>
+            <tr><td>Sick chicken calls (under 1 s)</td><td>Pig model</td><td><b>1 of 6</b>: 4 "not sure" (never counted), 1 mistaken for a distressed pig</td></tr>
+            <tr><td>Claps</td><td>Pig model</td><td><b>2 of 2</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="sub small">Our weak spot: half-second chicken squawks sound pig-like to the audio model. Retraining the pig model's "not a pig" check with 250 chicken recordings barely helped (93% to 94% rejected), so we kept the original model and say so here.</p>
+
+      <h3 class="subhead">Then we tried bats, and caught a third shortcut</h3>
+      <p class="sub">Could the same pipeline watch a captive colony for fights? We used 5,536 calls from 10 young Egyptian fruit bats, each one labelled by researchers watching synchronised video: who called, and what was happening (fighting, biting, mating protest, feeding, squabbling over sleeping spots).</p>
+      <div class="stats">
+        <div class="stat hl"><b>55%</b><span>spotting aggression in bats it never heard (guessing: 50%)</span></div>
+        <div class="stat"><b>0.87</b><span>AUC from the clock alone vs 0.85 for the model (aggression vs feeding)</span></div>
+        <div class="stat"><b>0.56</b><span>model AUC once time of day is held fixed</span></div>
+        <div class="stat"><b>48%</b><span>which of 10 bats is calling, days it never heard (chance: 10%)</span></div>
+      </div>
+      <div class="charts" style="grid-template-columns: minmax(0, 1fr); max-width: 1100px;">
+        <figure><img src="slides/7_bats.png" alt="Fruit bats. Spotting aggression vs all other calls: 65% on a random split, 63% on days never heard, 58% on chamber groups never heard, 55% on bats never heard. Aggression vs feeding, AUC on days never heard: model 0.85, time of day alone 0.87, microphone channel alone 0.77, model with night-time calls only and new bats 0.56."></figure>
+      </div>
+      <p class="sub">What we learned: aggression vs feeding looked promising (77% on days it never heard) until we checked the clock. Fights happen while the bats roost in the daytime and feeding happens at night, so the time of day alone predicts the label better than the model does. Hold the time fixed and the signal nearly disappears. What the audio model does hear reliably is <em>who</em> is calling. So we don't claim a bat aggression detector. It's the third shortcut we've caught: lab differences in pigs, recording properties in chickens, time of day in bats.</p>
+      <p class="sub small">Data: Prat, Taub, Pratt &amp; Yovel 2017, "An annotated dataset of Egyptian fruit bat vocalizations across varying contexts and during vocal ontogeny", <i>Scientific Data</i>; Figshare (CC0). Lab colony at Tel Aviv University, juveniles about 7–9 months old, 28 days. Recorded at 250 kHz and downsampled for the audio model, which drops sound above 16 kHz.</p>
+
+      <h3 class="subhead">How it's built, and what the AI does and doesn't do</h3>
+      <ol class="pipeline">
+        <li class="step pre"><span class="tag">Pretrained, not changed</span><b>1. Listen</b><p>Perch 2.0, Google's model for bird and animal sounds, turns each call into 1,536 numbers.</p></li>
+        <li class="step ours"><span class="tag">Trained by us</span><b>2. Decide</b><p>A small classifier learns calm vs distressed from 6,661 labelled pig calls, or healthy vs sick from 248 chicken recordings.</p></li>
+        <li class="step ours"><span class="tag">Fitted by us</span><b>3. Calibrate</b><p>So that "80% sure" is right about 80% of the time. When it's too close to call, it says "not sure".</p></li>
+        <li class="step ours"><span class="tag">Trained by us</span><b>4. Check the animal</b><p>A not-a-pig / not-a-chicken check, plus a "too unlike anything it trained on" check, rejects claps, coughs and the other species.</p></li>
+        <li class="step llm"><span class="tag">AI writer, not trained</span><b>5. Explain</b><p>A language model turns the measured numbers into one plain sentence. It never hears the audio, and anything it adds that isn't in the evidence (a new number, a feeling like "scared", a disease name) is rejected and a template is used instead.</p></li>
+      </ol>
+      <p class="sub small">No language model was trained. Every test holds out whole recordings: the classifier, calibration, similar-call search and animal checks never see the demo clips.</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

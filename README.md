@@ -78,6 +78,14 @@ cd bot && npm install && npm run dev              # iMessage bot (BOT_CHANNEL=te
 
 No model or data? `uvicorn api.mock_server:app --port 8000` serves the same API with fake predictions.
 
+**Pen builder** (add, rename and remove pens; pigs and hens in any pen): a separate copy of the hub in `web_lab/`, on its own server so the main demo is untouched:
+
+```bash
+HUB_WEB=web_lab .venv/bin/uvicorn api.server:app --port 8010   # http://localhost:8010
+```
+
+Pens are saved in your browser. Its pen ids are `L1`, `L2`, … so it never mixes with the main hub's pens on the shared chicken server.
+
 ## Data and credits
 
 - **SoundWel** pig vocalization database (6,887 calls, 17 contexts), Zenodo 8252482, CC BY 4.0. Briefer, E.F. et al. (2022), *Classification of pig calls produced from birth to slaughter according to their emotional valence and context of production*, Scientific Reports.

@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parents[1]
-WEB = ROOT / "web"
+WEB = Path(os.environ.get("HUB_WEB", ROOT / "web"))  # HUB_WEB=web_lab serves the pen-builder copy
 SOUNDWEL = ROOT / "data/raw/soundwel/Soundwel Dataset - Audio and Spectrograms"
 ESC = ROOT / "data/raw/esc50/ESC-50-master/audio"
 DEMO_TEAMS = ("ETHZ", "NMBU")  # FBN's held-out calm calls mostly read as distressed (DECISIONS.md)
