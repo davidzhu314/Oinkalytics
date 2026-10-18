@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bat colony · Oinkalytics</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23262b45'/%3E%3Cpath d='M6 12 Q16 30 26 12 Q16 18 6 12Z' fill='%23a08a78'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="colony.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="var(--pig)"/><ellipse cx="16" cy="19" rx="8" ry="6" fill="var(--pig-dark)"/><circle cx="13" cy="19" r="1.6" fill="var(--pig-ink)"/><circle cx="19" cy="19" r="1.6" fill="var(--pig-ink)"/></svg>
+      Oinkalytics
+    </a>
+    <nav>
+      <a href="index.html#barn">Barn</a>
+      <a href="index.html#think">Hear it think</a>
+      <a href="index.html#try">Try your own</a>
+      <a href="index.html#tested">How we tested</a>
+      <a href="colony.html" aria-current="page">Bat colony</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Who's calling?</h1>
+      <p>A colony of ten young Egyptian fruit bats, and a model that learned their voices. Every call you hear here was recorded on a day the model <em>never heard</em>. It can't tell whether they're fighting (we checked, and the clock knew more than the model), but it can often tell who's talking.</p>
+    </section>
+
+    <section class="section colony-layout">
+      <div class="roost-card">
+        <svg id="roost" class="roost" viewBox="0 0 1000 270" role="img" aria-label="Ten bats hanging from a roost beam"></svg>
+        <div class="roost-bar">
+          <button id="play" class="btn primary">▶ Play a mystery call</button>
+          <button id="replay" class="btn" disabled>↻ Replay</button>
+          <button id="reveal" class="btn" disabled>Reveal who called</button>
+          <label class="pick">Calls from
+            <select id="filter"><option value="">any bat</option></select>
+          </label>
+        </div>
+      </div>
+
+      <aside class="colony-side">
+        <div class="panel" id="result">
+          <h3>Listening…</h3>
+          <p class="sub small">Press <b>Play a mystery call</b>. You'll hear a real call from one of the ten bats, then see who the model thinks made it. Bats are picked in proportion to how often they really called, like a live colony; choose a bat below to test a quiet one.</p>
+        </div>
+        <div class="panel">
+          <h3>Scoreboard</h3>
+          <div class="score">
+            <div><b id="scoreRight">0 / 0</b><span>right this session</span></div>
+            <div><b id="scoreTop3">0 / 0</b><span>in its top 3</span></div>
+          </div>
+          <p class="sub small" id="heldout"></p>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><div>
+        <h2>How well it knows each bat</h2>
+        <p class="sub">On every call from the six days it never heard. Chatty bats are easy; the quiet ones barely called on those days, and the model rarely gets them.</p>
+      </div></div>
+      <div id="perBat" class="per-bat"></div>
+      <p class="sub small">Data: Prat, Taub, Pratt &amp; Yovel 2017, "An annotated dataset of Egyptian fruit bat vocalizations across varying contexts and during vocal ontogeny", <i>Scientific Data</i>; Figshare (CC0). Ten bats born in a lab colony at Tel Aviv University, about 7–9 months old, housed in groups of five. Model: Perch 2.0 embeddings + logistic regression, trained on 22 days and tested on 6 held-out days. Recorded at 250 kHz and downsampled, so you hear only the part of each call below 16 kHz. Part of what the model hears may be which chamber a bat lived in.</p>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="colony.js"></script>
+</body>
+</html>

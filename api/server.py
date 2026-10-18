@@ -179,6 +179,7 @@ app.include_router(build_router(store, real_predict,
                                 Health(ok=True, mode="real", model="perch_v2 emb_call + logreg (leave-session-out 0.675)"),
                                 on_alert=upgrade_explanation))
 
-from . import hub  # noqa: E402  the web hub at http://localhost:8000/
+from . import colony, hub  # noqa: E402  the web hub at http://localhost:8000/
 
+colony.install(app)  # bat "Who's calling?" (web/colony.html)
 hub.install(app)

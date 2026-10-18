@@ -1,0 +1,71 @@
+/* Bat colony page: layered on style.css (shared top bar, buttons, panels). */
+:root {
+  --night: #1f2440;
+  --night-2: #2c3356;
+  --beam: #6b4a2e;
+  --bat: #8a7464;
+  --bat-wing: #5a4a3f;
+  --bat-ink: #2a211b;
+  --guess: #f2c14e;
+  --right: #6fcf97;
+  --wrong: #f2a3b3;
+}
+nav a[aria-current="page"] { background: var(--ink); color: #fff; }
+
+.colony-layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+.roost-card { background: var(--night); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.roost { display: block; width: 100%; height: auto; }
+.roost-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; background: var(--night-2); }
+.roost-bar .btn { background: #3a4268; color: #fff; border-color: #4a5380; }
+.roost-bar .btn:hover { background: #46507c; }
+.roost-bar .btn.primary { background: var(--guess); color: var(--bat-ink); border-color: var(--guess); }
+.roost-bar .btn:disabled { opacity: .45; }
+.pick { color: #d9dcf0; font-size: 14px; font-weight: 600; display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.pick select { font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 999px; border: 1px solid #4a5380; background: #3a4268; color: #fff; }
+
+/* Bats (SVG) */
+.bat .body { fill: var(--bat); }
+.bat .wing { fill: var(--bat-wing); transition: transform .35s ease; transform-box: fill-box; }
+.bat .wing.l { transform-origin: right center; }
+.bat .wing.r { transform-origin: left center; }
+.bat.speaking .wing.l { transform: rotate(28deg) scaleX(1.35); }
+.bat.speaking .wing.r { transform: rotate(-28deg) scaleX(1.35); }
+.bat .ink { fill: var(--bat-ink); }
+.bat .eye { fill: #f7e7b4; }
+.bat .tag { font: 700 15px system-ui, sans-serif; fill: #c9cde6; text-anchor: middle; }
+.bat .ring { fill: none; stroke-width: 4; opacity: 0; transition: opacity .3s; }
+.bat.guess .ring.g { opacity: 1; stroke: var(--guess); }
+.bat.truth .ring.t { opacity: 1; }
+.bat .pct { font: 800 16px system-ui, sans-serif; fill: var(--guess); text-anchor: middle; opacity: 0; }
+.bat.guess .pct { opacity: 1; }
+.bat.dim { opacity: .45; transition: opacity .3s; }
+.wave-ring { fill: none; stroke: var(--guess); stroke-width: 2.5; }
+
+/* Side panels */
+.colony-side { display: grid; gap: 16px; }
+.panel { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+.panel h3 { font-size: 18px; margin-bottom: 6px; }
+.guesses { display: grid; gap: 8px; margin-top: 10px; }
+.gl { display: grid; grid-template-columns: 70px 1fr 44px; gap: 8px; align-items: center; font-size: 14px; }
+.gl .bar { height: 10px; background: #efe9db; border-radius: 5px; overflow: hidden; }
+.gl .bar i { display: block; height: 100%; background: var(--guess); border-radius: 5px; transition: width .6s ease; }
+.gl.top b { color: var(--ink); }
+.verdict-line { font-size: 17px; font-weight: 700; margin: 8px 0 0; }
+.verdict-line.ok { color: var(--calm); }
+.verdict-line.no { color: var(--alert); }
+.score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.score b { display: block; font-size: 30px; font-weight: 850; }
+.score span { font-size: 13px; color: var(--ink-2); }
+
+.per-bat { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.bat-card { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 14px; }
+.bat-card b { font-size: 18px; }
+.bat-card .meter { margin: 8px 0 4px; }
+.bat-card .meter i { background: var(--night-2); }
+.bat-card span { font-size: 13px; color: var(--ink-2); }
+
+@media (max-width: 1100px) {
+  .colony-layout { grid-template-columns: 1fr; }
+  .per-bat { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pick { margin-left: 0; }
+}
