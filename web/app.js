@@ -147,10 +147,11 @@ const SPECIES = {
   chicken: { base: "/hub-api/chicken", emoji: "🐔", noun: "chicken", words: { calm: "Healthy", distressed: "Sick" }, risk: "sick" },
 };
 // Each animal has a mood, set by its pen's mode: Calm = all calm, Stressed = all stressed,
-// Mixed = about a third stressed (at least one of each when there are two or more). The mood decides
+// Mixed = about 40% stressed (at least one of each when there are two or more). The mood decides
 // how the animal looks and which kind of held-out call it makes; the badge, border and speech bubbles
 // show what the model heard, so a wrong verdict is visible.
-const MIXED_SHARE = 1 / 3;
+const MIXED_SHARE = 0.4; // Mixed = 40% of animals stressed on average (at least one when there are 2+)
+const WALK_IN_SHARE = 0.42; // newcomers aim a touch higher so every pen size averages >= 40% (edges clip)
 const W = 400, H = 230;
 const pens = new Map();
 let layout = { 1: ["pig"], 2: ["pig", "chicken"], 3: ["chicken"], 4: ["pig", "chicken"] };
@@ -248,7 +249,12 @@ function addAnimal(pen, kind, walkIn) {
 /** A newcomer's mood follows the pen's mode. */
 function moodFor(pen) {
   if (pen.mode === "distressed") return "distressed";
-  if (pen.mode === "mixed") return Math.random() < MIXED_SHARE ? "distressed" : "calm";
+  if (pen.mode === "mixed") {
+    // Keep the pen near its share: the further below it the pen is, the likelier a stressed newcomer.
+    const n = pen.animals.length, stressed = pen.animals.filter((a) => a.mood === "distressed").length;
+    const want = (n + 1) * WALK_IN_SHARE - stressed;
+    return Math.random() < Math.min(1, Math.max(0, want)) ? "distressed" : "calm";
+  }
   return "calm";
 }
 
@@ -260,7 +266,9 @@ function applyMode(pen) {
     return;
   }
   const n = pen.animals.length;
-  const k = n >= 2 ? Math.max(1, Math.round(n * MIXED_SHARE)) : Math.random() < MIXED_SHARE ? 1 : 0;
+  // floor(0.4n), plus one more with the leftover probability: exactly 40% on average for every n.
+  const x = n * MIXED_SHARE, k0 = Math.floor(x) + (Math.random() < x - Math.floor(x) ? 1 : 0);
+  const k = n >= 2 ? Math.max(1, k0) : k0;
   const order = [...pen.animals].sort(() => Math.random() - 0.5);
   order.forEach((a, i) => { a.mood = i < k ? "distressed" : "calm"; });
 }
