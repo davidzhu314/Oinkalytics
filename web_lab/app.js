@@ -173,7 +173,7 @@ function loadPenList() {
 let penList = loadPenList();
 function savePens() {
   // A disaster is temporary: save the mode the pen had before it.
-  const list = [...pens.values()].map((p) => ({ id: p.id, name: p.name, mode: p.disaster ? p.prevMode || "mixed" : p.mode === "mine" ? "mixed" : p.mode,
+  const list = [...pens.values()].map((p) => ({ id: p.id, name: p.name, mode: p.beforeAll || (p.disaster ? p.prevMode || "mixed" : p.mode === "mine" ? "mixed" : p.mode),
     animals: p.animals.map((a) => ({ kind: a.kind, mood: a.mood, voice: a.voice?.name })), created: penCreated[p.id] }));
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ next: penList.next, pens: list })); } catch { /* not saved */ }
 }
@@ -678,7 +678,8 @@ const RANK = { idle: 0, calm: 1, watch: 2, alert: 3, critical: 4 };
 // critical when 4+ of its last 5 calls are distress calls; emergency = one pen critical without a break for
 // 2 minutes with 15+ new distress calls, or 2+ different pens critical at once for 45 s. The bot then sends a
 // 🚨 text + spoken voice note (one reminder at most); we show it here too.
-const EMERGENCY = { singleMs: 120_000, singleCalls: 15, multiPens: 2, multiMs: 45_000 };
+const EMERGENCY = { singleMs: 120_000, singleCalls: 15, multiPens: 2, multiMs: 45_000, allMinPens: 3, allMs: 20_000 };
+let allSince = null; // whole barn: every pen (3+) in distress (3+ of its last 5 calls) at once, for 20 s
 let emergencyNow = new Set();
 const critState = new Map(); // "sp:penId" -> { since, calls, last }
 let emergencyOn = false;
@@ -697,14 +698,25 @@ function checkEmergencies(states) {
     }
   }
   for (const k of [...critState.keys()]) if (!seen.has(k)) critState.delete(k);
+  // whole barn: pens with recent calls, each in distress through any species
+  const active = new Map();
+  for (const sp of Object.keys(SPECIES)) for (const s of Object.values(states[sp] || {})) {
+    if (!pens.has(s.pen_id) || !s.window || !s.updated_at || now - Date.parse(s.updated_at) > 120_000) continue;
+    active.set(s.pen_id, (active.get(s.pen_id) || false) || s.distressed >= 3);
+  }
+  const allIn = active.size >= EMERGENCY.allMinPens && [...active.values()].every(Boolean);
+  allSince = allIn ? allSince ?? now : null;
   const wide = critical.filter((c) => now - c.since >= EMERGENCY.multiMs);
-  const em = new Set(wide.map((c) => c.id)).size >= EMERGENCY.multiPens ? wide
-    : critical.filter((c) => now - c.since >= EMERGENCY.singleMs && c.calls >= EMERGENCY.singleCalls);
+  let reason = null, em = [];
+  if (allSince !== null && now - allSince >= EMERGENCY.allMs) { reason = "all"; em = [...active.keys()].map((id) => ({ id })); }
+  else if (new Set(wide.map((c) => c.id)).size >= EMERGENCY.multiPens) { reason = "multi"; em = wide; }
+  else em = critical.filter((c) => now - c.since >= EMERGENCY.singleMs && c.calls >= EMERGENCY.singleCalls);
   emergencyNow = new Set(em.map((c) => c.id));
   if (em.length && !emergencyOn) {
     emergencyOn = true;
     const ids = [...emergencyNow], names = ids.map(penLabel).join(", ");
-    const msg = ids.length > 1
+    const msg = reason === "all" ? `🚨 EMERGENCY · Every pen in the barn is in distress at once: ${names}. Please check the barn now.`
+      : ids.length > 1
       ? `🚨 EMERGENCY · ${ids.length} pens have been in severe distress at the same time: ${names}. Please check the barn now.`
       : `🚨 EMERGENCY · ${names} has been in severe, non-stop distress for over 2 minutes. Please check the pen now.`;
     const li = el("li", { class: "sms emergency" }, el("time", { text: new Date().toLocaleTimeString() }), msg + ' Reply "OK" when you\'re on it.',
@@ -1030,7 +1042,7 @@ function stopFx(pen, quiet = false) {
   delete pen.fx;
   pen.card.querySelector(".disaster-banner")?.remove();
   pen.card.classList.remove("disaster", "shaking");
-  const back = pen.prevMode || "mixed";
+  const back = pen.beforeAll ? "distressed" : pen.prevMode || "mixed";
   delete pen.disaster; delete pen.prevMode;
   if (!quiet) { setMode(pen, back); toast(`✓ All clear in ${pen.name}.`); }
   updateDisasterMenu(pen);
@@ -1197,6 +1209,29 @@ function bolt(pen) {
   for (const a of pen.animals) a.panicT = 0;
 }
 
+// "Distress all pens": every pen with animals goes Stressed; clicking again restores each pen's own mode.
+let distressAllOn = false;
+function toggleDistressAll() {
+  const btn = $("#distressAll");
+  if (!distressAllOn) {
+    const withAnimals = [...pens.values()].filter((p) => p.animals.length);
+    if (!withAnimals.length) return toast("Add some animals first.");
+    for (const p of withAnimals) {
+      p.beforeAll = p.disaster ? p.prevMode || "mixed" : p.mode === "mine" ? "mixed" : p.mode;
+      if (p.mode !== "distressed") setMode(p, "distressed");
+    }
+    distressAllOn = true;
+    btn.textContent = "✓ Calm all pens"; btn.setAttribute("aria-pressed", "true"); btn.classList.add("on");
+    toast(`🚨 Every pen is in distress: ${withAnimals.map((p) => p.name).join(", ")}.`);
+    if (!running) { $("#speed").value = "0.5"; $("#speedOut").textContent = "0.5 s"; setRunning(true); }
+  } else {
+    for (const p of pens.values()) if (p.beforeAll) { if (!p.fx) setMode(p, p.beforeAll); delete p.beforeAll; }
+    distressAllOn = false;
+    btn.textContent = "🚨 Distress all pens"; btn.setAttribute("aria-pressed", "false"); btn.classList.remove("on");
+    toast("✓ All pens are back to their own modes.");
+  }
+}
+
 function updateDisasterMenu(pen) {
   if (!pen.dMenu) return;
   pen.dMenu.querySelector(".clear").hidden = !pen.fx;
@@ -1224,6 +1259,7 @@ async function boot() {
     el("span", { class: "plus", text: "＋" }), el("span", { text: "Add a pen" }));
   $("#pens").replaceChildren(...penList.pens.map(buildPen), addCard);
   $("#addPen").onclick = addPen;
+  $("#distressAll").onclick = toggleDistressAll;
   // close any open pen disaster menu when clicking elsewhere
   document.addEventListener("click", (e) => { if (!e.target.closest(".pen-disaster")) closeDisasterMenus(); });
   for (const pen of pens.values()) syncPen(pen); // names may be new to a restarted server

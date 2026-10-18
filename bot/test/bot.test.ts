@@ -347,3 +347,33 @@ test("'OK' acknowledges an emergency; longer messages keep their meaning", async
   assert.ok(state.emergencyAckAt && state.emergencyAckAt <= Date.now());
   assert.match(r[0].kind === "text" ? r[0].text : "", /stop the emergency alerts/);
 });
+
+
+test("whole barn: every pen (3+) in distress at once for 20 s is an emergency", () => {
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
+  const pen = (id: string, distressed: number) =>
+    ({ pen_id: id, name: `Barn ${id}`, level: "alert" as const, window: 5, distressed, last_prediction_id: "x", updated_at: null, summary: "" });
+  const w = (p: ReturnType<typeof pen>) => ({ key: `Pigs:${p.pen_id}`, src: pig, pen: p });
+  const three = (d: number[]) => d.map((x, i) => w(pen(String(i + 1), x)));
+  let watch = emergencyWatch();
+  watch.update(three([3, 3, 3]), 0);
+  assert.deepEqual(watch.update(three([3, 3, 3]), 10_000), []);              // not for 20 s yet
+  const em = watch.update(three([3, 3, 3]), 21_000);
+  assert.deepEqual(em.map((x) => x.pen.pen_id), ["1", "2", "3"]);
+  assert.equal(watch.reason, "all");
+  assert.match(emergencyText(em, watch.reason), /^🚨 EMERGENCY · Every pen in the barn is in distress at once: 🐷 Barn 1, 🐷 Barn 2, 🐷 Barn 3\./);
+  // one calm pen among three: not the whole barn
+  watch = emergencyWatch();
+  watch.update(three([3, 3, 1]), 0);
+  assert.deepEqual(watch.update(three([3, 3, 1]), 30_000), []);
+  // only two pens: not enough for "every pen"
+  watch = emergencyWatch();
+  watch.update([w(pen("1", 3)), w(pen("2", 3))], 0);
+  assert.deepEqual(watch.update([w(pen("1", 3)), w(pen("2", 3))], 30_000), []);
+  // a blip: all three for 10 s, one calms down, all three again: the clock restarts
+  watch = emergencyWatch();
+  watch.update(three([3, 3, 3]), 0);
+  watch.update(three([3, 3, 2]), 10_000);
+  watch.update(three([3, 3, 3]), 12_000);
+  assert.deepEqual(watch.update(three([3, 3, 3]), 25_000), []);
+});

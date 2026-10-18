@@ -401,3 +401,6 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 .wolf.chomp .jaw { animation: chomp .16s ease-in-out infinite alternate; }
 @keyframes chomp { to { transform: rotate(22deg); } }
 .pen.shaking { animation: shake .5s ease-in-out 1; }
+
+.btn.danger { background: #fff1ee; border-color: #e8b3a9; color: #9a2f22; }
+.btn.danger.on { background: #7a2318; color: #fff; border-color: #7a2318; }

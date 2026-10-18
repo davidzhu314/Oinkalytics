@@ -192,13 +192,20 @@ export async function handle(text: string, sources: Source[], state: BotState): 
  *   - one pen critical without a break for EMERGENCY.singleMs, with at least EMERGENCY.singleCalls new
  *     distress calls in that time, or
  *   - EMERGENCY.multiPens or more different pens critical at once, each for at least EMERGENCY.multiMs
- *     (a barn-wide incident: predator, fire, storm). Pigs and hens in the same pen count as one pen.
+ *     (a barn-wide incident: predator, fire, storm). Pigs and hens in the same pen count as one pen, or
+ *   - the whole barn: EMERGENCY.allMinPens or more pens and every one of them in distress (3+ of its last
+ *     5 calls) at the same time, for EMERGENCY.allMs.
  *  Any non-critical reading resets that pen's clock. Stateful but clock-injected, so it's tested. */
-export const EMERGENCY = { singleMs: 120_000, singleCalls: 15, multiPens: 2, multiMs: 45_000 };
+export const EMERGENCY = { singleMs: 120_000, singleCalls: 15, multiPens: 2, multiMs: 45_000, allMinPens: 3, allMs: 20_000 };
+export type EmergencyReason = "all" | "multi" | "single";
+const DISTRESS_AT = 3; // a pen "in distress": the server's alert threshold, 3 of the last 5 calls
 export type Watched = { key: string; src: Source; pen: PenStatus };
 export function emergencyWatch(cfg = EMERGENCY) {
   const st = new Map<string, { since: number; calls: number; last: string | null }>();
+  let allSince: number | null = null;
   return {
+    /** Why the last update() returned an emergency. */
+    reason: null as EmergencyReason | null,
     /** Feed every (fresh) pen on every poll; returns the pens in a true emergency right now. */
     update(pens: Watched[], now: number): Watched[] {
       const seen = new Set<string>();
@@ -213,9 +220,22 @@ export function emergencyWatch(cfg = EMERGENCY) {
         critical.push({ ...w, since: s.since, calls: s.calls });
       }
       for (const k of [...st.keys()]) if (!seen.has(k)) st.delete(k); // pen gone or stale
+      const strip = (xs: Watched[]) => xs.map(({ key, src, pen }) => ({ key, src, pen }));
+      // the whole barn: every pen (3+) in distress at once
+      const byPen = new Map<string, Watched[]>();
+      for (const w of pens) byPen.set(w.pen.pen_id, [...(byPen.get(w.pen.pen_id) ?? []), w]);
+      const distressed = [...byPen.values()].filter((ws) => ws.some((w) => w.pen.window >= DISTRESS_AT && w.pen.distressed >= DISTRESS_AT));
+      if (byPen.size >= cfg.allMinPens && distressed.length === byPen.size) allSince ??= now;
+      else allSince = null;
+      if (allSince !== null && now - allSince >= cfg.allMs) {
+        this.reason = "all";
+        return strip(distressed.map((ws) => ws.find((w) => w.pen.distressed >= DISTRESS_AT)!));
+      }
       const wide = critical.filter((c) => now - c.since >= cfg.multiMs);
-      if (new Set(wide.map((c) => c.pen.pen_id)).size >= cfg.multiPens) return wide.map(({ key, src, pen }) => ({ key, src, pen }));
-      return critical.filter((c) => now - c.since >= cfg.singleMs && c.calls >= cfg.singleCalls).map(({ key, src, pen }) => ({ key, src, pen }));
+      if (new Set(wide.map((c) => c.pen.pen_id)).size >= cfg.multiPens) { this.reason = "multi"; return strip(wide); }
+      const single = critical.filter((c) => now - c.since >= cfg.singleMs && c.calls >= cfg.singleCalls);
+      this.reason = single.length ? "single" : null;
+      return strip(single);
     },
   };
 }
@@ -223,9 +243,11 @@ export function emergencyWatch(cfg = EMERGENCY) {
 const placeOf = (w: Watched) => `${w.src.emoji ? `${w.src.emoji} ` : ""}${penTitle(w.pen.pen_id, w.pen.name)}`;
 const uniquePens = (ws: Watched[]) => [...new Map(ws.map((w) => [w.pen.pen_id, w])).values()];
 
-export function emergencyText(ws: Watched[]): string {
+export function emergencyText(ws: Watched[], reason: EmergencyReason | null = null): string {
   const pens = uniquePens(ws);
-  const what = pens.length > 1
+  const what = reason === "all"
+    ? `Every pen in the barn is in distress at once: ${ws.map(placeOf).join(", ")}.`
+    : pens.length > 1
     ? `${pens.length} pens have been in severe distress at the same time: ${ws.map(placeOf).join(", ")}.`
     : `${placeOf(ws[0])} has been in severe, non-stop distress for over ${Math.round(EMERGENCY.singleMs / 60_000)} minutes.`;
   return `🚨 EMERGENCY · ${what} This could be a predator, fire or injury. Please check ${pens.length > 1 ? "the barn" : "the pen"} now.\n` +
@@ -233,9 +255,10 @@ export function emergencyText(ws: Watched[]): string {
 }
 
 /** What the voice note says (no emoji, short sentences for text-to-speech). */
-export function emergencySpeech(ws: Watched[]): string {
+export function emergencySpeech(ws: Watched[], reason: EmergencyReason | null = null): string {
   const pens = uniquePens(ws);
   const names = pens.map((w) => penTitle(w.pen.pen_id, w.pen.name));
+  if (reason === "all") return `Emergency. Every pen in the barn is in distress at once: ${names.join(", ")}. Please check the barn now.`;
   return pens.length > 1
     ? `Emergency at the barn. ${pens.length} pens are in severe distress at the same time: ${names.join(", ")}. Please check the barn now.`
     : `Emergency at ${names[0]}. The animals have been in severe distress for over two minutes. Please check the pen now.`;

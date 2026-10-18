@@ -8,6 +8,8 @@ A running log of choices we make during the build. Newest first.
 - **Emergency = sustained and severe**, not "the last 5 calls were bad" (an ordinary stressed pen does that). A pen is critical at 4+ of its last 5 calls distressed. Emergency when **one pen stays critical without a break for 2 min with 15+ new distress calls**, or **2+ different pens are critical together for 45 s** (pigs and hens in one pen count as one pen). Any non-critical reading resets that pen's clock; pens with no calls for 2 min are ignored.
 - **Emergency message:** 🚨 text plus a spoken voice note, then **at most one reminder after 10 min** if it's still going and nobody replied OK. An incident ends after 30 min without an emergency reading.
 - **Demo:** put a disaster in **two pens** and wait about 90 s for the emergency, or one pen for over 2 min. 22/22 bot tests pass.
+- **Third trigger, the whole barn:** 3+ pens with recent calls, **every one in distress** (3+ of its last 5 calls) at once, for 20 s. The pen builder's **🚨 Distress all pens** button sets every pen with animals to Stressed and starts the barn; clicking again (✓ Calm all pens) restores each pen's own mode. Tested: the emergency fired about 70 s after pressing it. 23/23 bot tests pass.
+- **Demo gotcha:** the bot sees **every pen from every open pen-builder tab**. "Every pen in distress" only holds if all of them are, so demo with **one** pen-builder tab open.
 
 ## Hour 24: pen builder wired to the iMessage bot (pen names; additive API)
 

@@ -223,8 +223,8 @@ const emergencyLoop = setInterval(async () => {
     incident.sent += 1;
     incident.lastAt = now;
     const reminder = incident.sent > 1;
-    await space.send((reminder ? "Reminder: " : "") + emergencyText(em)).catch((err) => console.error("[emergency] text failed:", err));
-    const audio = reminder ? null : await speech(emergencySpeech(em));
+    await space.send((reminder ? "Reminder: " : "") + emergencyText(em, watch.reason)).catch((err) => console.error("[emergency] text failed:", err));
+    const audio = reminder ? null : await speech(emergencySpeech(em, watch.reason));
     if (audio) await space.send(voice(audio, { mimeType: "audio/mp4", name: "emergency.m4a" }))
       .catch((err) => console.error("[emergency] voice note failed:", err));
     for (const w of em) penTexted.set(w.pen.pen_id, now);
