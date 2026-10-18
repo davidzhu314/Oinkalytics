@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alertText, escalationText, escalator, handle, parse, penOf, severity, type BotState, type Source } from "../src/commands.ts";
+import { alertText, emergencyPens, emergencySpeech, emergencyText, escalationText, escalator, handle, parse, penOf, severity, type BotState, type Source } from "../src/commands.ts";
 import { alertPoller } from "../src/alerts.ts";
 import { classify, onceEvery, rateLimiter } from "../src/guard.ts";
 import type { Alert, Oink } from "../src/oink.ts";
@@ -287,4 +287,32 @@ test("a warned pen that gets worse gets one critical follow-up, within 10 minute
   const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
   assert.equal(escalationText(pig, pen(4)), "🚨 Critical · 🐷 Pen 3: it's getting worse. 4 of the last 5 calls from the pen now sound stressed. " +
     'Please check the pen now.\nReply "play it" to hear the call.');
+});
+
+
+test("emergency: a pen with 5 of 5 distress calls, or 2+ critical pens at once", () => {
+  const pen = (id: string, distressed: number, window = 5, name: string | null = null) =>
+    ({ pen_id: id, name, level: "alert" as const, window, distressed, last_prediction_id: null, updated_at: null, summary: "" });
+  assert.deepEqual(emergencyPens([pen("1", 4), pen("2", 1)]), []);                 // one critical pen: not yet
+  assert.deepEqual(emergencyPens([pen("1", 5), pen("2", 1)]).map((p) => p.pen_id), ["1"]); // all 5 distressed
+  assert.deepEqual(emergencyPens([pen("1", 4, 4)]), []);                            // window not full yet
+  assert.deepEqual(emergencyPens([pen("1", 4), pen("2", 4), pen("3", 0)]).map((p) => p.pen_id), ["1", "2"]); // barn-wide
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
+  const one = [pen("L1-a", 5, 5, "North barn")];
+  assert.match(emergencyText(pig, one), /^🚨 EMERGENCY · 🐷 North barn: every one of the last 5 calls is a distress call\./);
+  assert.match(emergencyText(pig, one), /Reply "OK" when you're on it\.$/);
+  assert.match(emergencyText(pig, [pen("1", 4), pen("2", 4, 5, "South")]), /2 pens sound stressed at once: Pen 1, South\./);
+  assert.equal(emergencySpeech(pig, one), "Emergency at North barn. Every recent call from the pigs is a distress call. Please check the pen now.");
+});
+
+test("'OK' acknowledges an emergency; longer messages keep their meaning", async () => {
+  assert.equal(parse("OK"), "ack");
+  assert.equal(parse("on it!"), "ack");
+  assert.equal(parse("ok thanks"), "ack");
+  assert.equal(parse("ok what's the status"), "status");
+  const state: BotState = { muted: false };
+  const pig: Source = { name: "Pigs", emoji: "🐷", match: /pig/, oink: fakeOink() };
+  const r = await handle("okay", [pig], state);
+  assert.ok(state.emergencyAckAt && state.emergencyAckAt <= Date.now());
+  assert.match(r[0].kind === "text" ? r[0].text : "", /stop the emergency alerts/);
 });

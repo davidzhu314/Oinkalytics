@@ -6,7 +6,7 @@ export type Reply =
   | { kind: "text"; text: string }
   | { kind: "audio"; bytes: Buffer; name: string };
 
-export type BotState = { muted: boolean };
+export type BotState = { muted: boolean; emergencyAckAt?: number };
 
 /** One monitored species: its API and how to name it ("Pigs", "Chickens"). The first is the main one. */
 export type Source = {
@@ -73,11 +73,13 @@ export function normalize(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type Command = "status" | "why" | "play" | "mute" | "unmute" | "help";
+type Command = "ack" | "status" | "why" | "play" | "mute" | "unmute" | "help";
 
 // Checked in this order, anywhere in the message, so a judge's natural phrasing works:
 // "how's the coop doing", "what's wrong in pen 3", "can I hear it", "please stop the alerts".
 const INTENTS: [Command, RegExp][] = [
+  // A short "OK" / "on it" acknowledges an emergency (checked first: "ok" alone means nothing else).
+  ["ack", /^(ok(ay)?|k|on it|on my way|got it|ack(nowledged)?|coming|heading (there|over)|i m (on it|coming))( thanks?| thank you)?$/],
   ["unmute", /\b(unmute|unsilence|resume|turn (the )?alerts? (back )?on|alerts? (back )?on|start (the )?alerts?)\b/],
   ["mute", /\b(mute|silence|shh+|stop (the )?(alerts?|texts?|messages?)|turn (the )?alerts? off|alerts? off)\b/],
   ["play", /\b(play|listen|hear|sound(ed)? like|send (me )?(the )?(audio|clip|call|recording))\b/],
@@ -165,6 +167,9 @@ export async function handle(text: string, sources: Source[], state: BotState): 
           { kind: "audio", bytes, name: `${who}pen-${hit.alert.pen_id}-call.wav` },
         ];
       }
+      case "ack":
+        state.emergencyAckAt = Date.now();
+        return say("Thanks, I'll stop the emergency alerts. I'm still listening and will text you if anything changes.");
       case "mute":
         state.muted = true;
         return say('Alerts muted. I\'ll still answer "status" and "why". Text "unmute" to turn them back on.');
@@ -180,6 +185,37 @@ export async function handle(text: string, sources: Source[], state: BotState): 
     console.error(`[bot] command ${cmd ?? "?"} failed:`, err);
     return say(UNREACHABLE);
   }
+}
+
+/** Emergency: a pen whose last EMERGENCY_FULL confident calls are all distress calls, or several pens
+ *  critical at once (a barn-wide incident: wildlife, fire, storm). Pure, so it's tested. */
+export const EMERGENCY_FULL = 5;
+export const EMERGENCY_PENS = 2;
+export function emergencyPens(pens: PenStatus[]): PenStatus[] {
+  const full = pens.filter((p) => p.window >= EMERGENCY_FULL && p.distressed === p.window);
+  const critical = pens.filter((p) => p.distressed >= CRITICAL_AT);
+  return critical.length >= EMERGENCY_PENS ? critical : full;
+}
+
+export function emergencyText(src: Source, pens: PenStatus[]): string {
+  const bad = src.bad ?? "stressed";
+  const names = pens.map((p) => penTitle(p.pen_id, p.name));
+  const where = src.emoji ? `${src.emoji} ` : "";
+  const what = pens.length > 1
+    ? `${where}${pens.length} pens sound ${bad} at once: ${names.join(", ")}.`
+    : `${where}${names[0]}: every one of the last ${pens[0].window} calls is a ${bad === "sick" ? "sick" : "distress"} call.`;
+  return `🚨 EMERGENCY · ${what} This could be a serious incident. Please check ${pens.length > 1 ? "the barn" : "the pen"} now.
+` +
+    'Reply "OK" when you\'re on it.';
+}
+
+/** What the voice note says (no emoji, short sentences for text-to-speech). */
+export function emergencySpeech(src: Source, pens: PenStatus[]): string {
+  const animals = src.noun === "hen" ? "hens" : "pigs";
+  const names = pens.map((p) => penTitle(p.pen_id, p.name));
+  return pens.length > 1
+    ? `Emergency at the barn. ${pens.length} pens sound ${src.bad ?? "stressed"} at once: ${names.join(", ")}. Please check the barn now.`
+    : `Emergency at ${names[0]}. Every recent call from the ${animals} is a distress call. Please check the pen now.`;
 }
 
 /** Follow-up when a pen that already got a warning gets worse (the server only alerts once per pen per 5 min). */

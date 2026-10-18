@@ -172,7 +172,8 @@ function loadPenList() {
 }
 let penList = loadPenList();
 function savePens() {
-  const list = [...pens.values()].map((p) => ({ id: p.id, name: p.name, mode: p.mode === "mine" ? "mixed" : p.mode,
+  // A disaster is temporary: save the mode the pen had before it.
+  const list = [...pens.values()].map((p) => ({ id: p.id, name: p.name, mode: p.disaster ? p.prevMode || "mixed" : p.mode === "mine" ? "mixed" : p.mode,
     animals: p.animals.map((a) => ({ kind: a.kind, mood: a.mood, voice: a.voice?.name })), created: penCreated[p.id] }));
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ next: penList.next, pens: list })); } catch { /* not saved */ }
 }
@@ -647,6 +648,33 @@ function animate(now) {
 const CRITICAL_AT = 4;
 const LEVEL = { calm: "✓ Calm", watch: "◐ Watch", alert: "⚠ Warning", critical: "🚨 Critical", idle: "○ Quiet", waiting: "○ Waiting" };
 const RANK = { idle: 0, calm: 1, watch: 2, alert: 3, critical: 4 };
+// Same rule as the bot (bot/src/commands.ts emergencyPens): a pen whose last 5 calls are all distress
+// calls, or 2+ pens critical at once. The bot sends a 🚨 text + spoken voice note; we show it here too.
+let emergencyNow = new Set();
+const emergencyIncidents = {}; // species -> true while an incident is ongoing
+function checkEmergencies(states) {
+  const now = new Set();
+  for (const sp of Object.keys(SPECIES)) {
+    const mine = Object.values(states[sp] || {}).filter((s) => pens.has(s.pen_id));
+    const full = mine.filter((s) => s.window >= 5 && s.distressed === s.window);
+    const critical = mine.filter((s) => s.distressed >= CRITICAL_AT);
+    const em = critical.length >= 2 ? critical : full;
+    em.forEach((s) => now.add(s.pen_id));
+    if (em.length && !emergencyIncidents[sp]) {
+      emergencyIncidents[sp] = true;
+      const names = em.map((s) => penLabel(s.pen_id)).join(", ");
+      const msg = `🚨 EMERGENCY · ${SPECIES[sp].emoji} ${em.length > 1 ? `${em.length} pens at once: ${names}` : `${names}: every recent call is a distress call`}. ` +
+        "Check the pen now. Reply \"OK\" when you're on it.";
+      const li = el("li", { class: "sms emergency" }, el("time", { text: new Date().toLocaleTimeString() }), msg,
+        el("div", { class: "why", text: "🔊 Also sent as a spoken voice note, repeated every minute until the farmer replies OK." }));
+      $(".empty", $("#alertList"))?.remove();
+      $("#alertList").prepend(li);
+      toast(`🚨 Emergency voice message sent to the farmer: ${names}`);
+    } else if (!em.length) delete emergencyIncidents[sp];
+  }
+  emergencyNow = now;
+}
+
 async function pollPens() {
   const states = {};
   for (const sp of Object.keys(SPECIES)) {
@@ -654,6 +682,7 @@ async function pollPens() {
     try { states[sp] = Object.fromEntries((await api(`${SPECIES[sp].base}/pens`)).map((s) => [s.pen_id, s])); }
     catch { /* down: shown as waiting */ }
   }
+  checkEmergencies(states);
   for (const pen of pens.values()) {
     const parts = [];
     let level = "idle";
@@ -677,6 +706,8 @@ async function pollPens() {
     pen.card.className = `pen ${level === "waiting" ? "idle" : level === "critical" ? "alert critical" : level}`;
     pen.card.classList.toggle("empty", !pen.animals.length); // keep the pen's own flags across refreshes
     pen.card.classList.toggle("heard", !!pen.clicked);
+    pen.card.classList.toggle("disaster", !!pen.disaster);
+    pen.card.classList.toggle("emergency", emergencyNow.has(pen.id));
     const shown = parts.length ? parts.flatMap((p, i) => (i ? [el("br"), p] : [p])) : ["No calls yet."];
     pen.summary.replaceChildren(...shown);
   }
@@ -688,7 +719,7 @@ async function barnLoop() {
   let i = 0;
   while (running) {
     // Pens hearing stressed calls or your clips get two turns per round; the others get one.
-    const order = [...pens.values()].flatMap((p) => (p.mode === "distressed" || p.mode === "mine" ? [p, p] : [p]));
+    const order = [...pens.values()].flatMap((p) => (p.disaster ? [p, p, p] : p.mode === "distressed" || p.mode === "mine" ? [p, p] : [p]));
     if (!order.length) { await sleep(500); continue; }
     const pen = order[i++ % order.length];
     const t0 = performance.now();
@@ -810,6 +841,88 @@ async function toggleRecord() {
   btn.classList.add("rec");
 }
 
+// ---------- Disasters (demo) ----------
+// A disaster only decides which held-out recordings the animals make (real distress calls, more often);
+// the models still judge every call for real, and the alerts and emergency follow from what they hear.
+const DISASTERS = {
+  wildlife: { banner: "🐺 A wolf got into the pen!", toast: "🐺 A wolf broke into" },
+  asteroid: { banner: "☄️ Asteroid impact!", toast: "☄️ An asteroid hit" },
+  fire: { banner: "🔥 Fire in the pen!", toast: "🔥 Fire broke out in" },
+  storm: { banner: "🌪️ Tornado over the barn!", toast: "🌪️ A storm hit the barn:" },
+};
+const fireTimers = [];
+const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
+
+function fxNodes(kind) {
+  if (kind === "wildlife") return [el("span", { class: "fx-wolf", text: "🐺" })];
+  if (kind === "asteroid") return [el("div", { class: "fx-crater" }), el("div", { class: "fx-flash" }), el("span", { class: "fx-meteor", text: "☄️" })];
+  if (kind === "fire") return [el("div", { class: "fx-smoke" }),
+    ...Array.from({ length: 8 }, (_, i) => el("span", { class: "fx-flame", text: "🔥", style: `left:${4 + i * 12}%;animation-delay:${(i % 4) * 0.18}s` }))];
+  return [el("span", { class: "fx-tornado", text: "🌪️" })];
+}
+
+function strike(pen, kind) {
+  if (!pen.disaster) pen.prevMode = pen.mode === "mine" ? "mixed" : pen.mode;
+  pen.disaster = kind;
+  pen.card.querySelector(".disaster-fx")?.remove();
+  pen.card.querySelector(".disaster-banner")?.remove();
+  pen.card.querySelector(".field-wrap").append(el("div", { class: `disaster-fx ${kind}`, "aria-hidden": "true" }, fxNodes(kind)));
+  pen.card.querySelector(".pen-head").after(el("div", { class: "disaster-banner", role: "status", text: DISASTERS[kind].banner }));
+  pen.card.classList.add("disaster");
+  if (pen.mode !== "distressed") setMode(pen, "distressed");
+}
+
+function disaster(kind) {
+  $("#disasterMenu").hidden = true;
+  $("#disasterBtn").setAttribute("aria-expanded", "false");
+  if (kind === "clear") return allClear();
+  const all = [...pens.values()];
+  const occupied = all.filter((p) => p.animals.length);
+  if (!occupied.length) return toast("Add some animals first: a disaster needs someone to panic.");
+  let hit = [];
+  if (kind === "wildlife") hit = [pick(occupied)];
+  else if (kind === "storm") {
+    hit = occupied;
+    document.body.classList.add("storming");
+    if (!$(".storm-fx")) document.body.append(el("div", { class: "storm-fx", "aria-hidden": "true" }, el("div", { class: "fx-rain" }), el("div", { class: "fx-lightning" })));
+  } else if (kind === "asteroid") {
+    const t = pick(occupied);
+    hit = [t];
+    const i = all.indexOf(t);
+    // the blast reaches the neighbouring pens a moment after impact
+    setTimeout(() => [all[i - 1], all[i + 1]].filter((p) => p && p.animals.length && pens.has(p.id)).forEach((p) => strike(p, "asteroid")), 1600);
+  } else if (kind === "fire") {
+    const start = pick(occupied);
+    hit = [start];
+    const order = [...occupied.slice(occupied.indexOf(start) + 1), ...occupied.slice(0, occupied.indexOf(start))];
+    order.forEach((p, k) => fireTimers.push(setTimeout(() => { if (pens.has(p.id)) { strike(p, "fire"); toast(`🔥 The fire spread to ${p.name}.`); } }, 5000 * (k + 1))));
+  }
+  hit.forEach((p) => strike(p, kind));
+  toast(`${DISASTERS[kind].toast} ${hit.map((p) => p.name).join(", ")}!`);
+  if (!running) {
+    $("#speed").value = "0.5"; $("#speedOut").textContent = "0.5 s";
+    setRunning(true);
+  }
+}
+
+function allClear() {
+  fireTimers.splice(0).forEach(clearTimeout);
+  document.body.classList.remove("storming");
+  $(".storm-fx")?.remove();
+  let n = 0;
+  for (const pen of pens.values()) {
+    if (!pen.disaster) continue;
+    n += 1;
+    pen.card.querySelector(".disaster-fx")?.remove();
+    pen.card.querySelector(".disaster-banner")?.remove();
+    pen.card.classList.remove("disaster");
+    const back = pen.prevMode || "mixed";
+    delete pen.disaster; delete pen.prevMode;
+    setMode(pen, back);
+  }
+  toast(n ? "✓ All clear. The pens are back to normal." : "Nothing to clear.");
+}
+
 // ---------- Boot ----------
 async function boot() {
   setInterval(health, 10000);
@@ -827,6 +940,14 @@ async function boot() {
     el("span", { class: "plus", text: "＋" }), el("span", { text: "Add a pen" }));
   $("#pens").replaceChildren(...penList.pens.map(buildPen), addCard);
   $("#addPen").onclick = addPen;
+  $("#disasterBtn").onclick = (e) => {
+    e.stopPropagation();
+    const m = $("#disasterMenu");
+    m.hidden = !m.hidden;
+    $("#disasterBtn").setAttribute("aria-expanded", String(!m.hidden));
+  };
+  for (const b of document.querySelectorAll("#disasterMenu button")) b.onclick = () => disaster(b.dataset.d);
+  document.addEventListener("click", (e) => { if (!e.target.closest(".disaster-wrap")) $("#disasterMenu").hidden = true; });
   for (const pen of pens.values()) syncPen(pen); // names may be new to a restarted server
   requestAnimationFrame(animate);
 

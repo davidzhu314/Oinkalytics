@@ -1,9 +1,14 @@
 // Oinkalytics Photon bot. BOT_CHANNEL=terminal (default, no credentials) or imessage (Spectrum Cloud).
 
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { Spectrum, attachment, type PlatformProviderConfig, type Space } from "spectrum-ts";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { Spectrum, attachment, voice, type PlatformProviderConfig, type Space } from "spectrum-ts";
 import { oinkClient, type Alert } from "./oink.ts";
-import { alertText, escalationText, escalator, handle, type BotState, type Reply, type Source } from "./commands.ts";
+import { alertText, emergencyPens, emergencySpeech, emergencyText, escalationText, escalator, handle, type BotState, type Reply, type Source } from "./commands.ts";
 import { alertPoller } from "./alerts.ts";
 import { classify, onceEvery, rateLimiter } from "./guard.ts";
 
@@ -151,9 +156,64 @@ const escalation = setInterval(async () => {
   }
 }, 3000);
 
+// ---------- Emergencies ----------
+// A pen whose last 5 calls are all distress calls, or 2+ pens critical at once: a 🚨 text plus a spoken
+// voice note (macOS text-to-speech), repeated every minute up to 3 times until the farmer replies "OK".
+// Photon's shared iMessage line can't place phone calls; a voice note is the loudest thing it can send.
+const run = promisify(execFile);
+async function speech(text: string): Promise<Buffer | null> {
+  if (process.platform !== "darwin") return null;
+  const dir = await mkdtemp(join(tmpdir(), "oink-voice-"));
+  const file = join(dir, "emergency.m4a");
+  try {
+    await run("say", ["-r", "170", "-o", file, "--file-format=m4af", text]);
+    return await readFile(file);
+  } catch (err) {
+    console.error("[emergency] couldn't make the voice note:", err);
+    return null;
+  } finally {
+    rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+const EMERGENCY_REPEAT_MS = 60_000;
+const EMERGENCY_MAX = 3;
+const incidents = new Map<string, { since: number; lastAt: number; sent: number }>(); // per species
+let emergencyBusy = false;
+const emergencyLoop = setInterval(async () => {
+  if (emergencyBusy) return;
+  emergencyBusy = true;
+  try {
+    for (const src of sources) {
+      let pens;
+      try { pens = await src.oink.pens(); } catch { continue; }
+      const em = emergencyPens(pens);
+      if (!em.length) { incidents.delete(src.name); continue; } // calmed down: the next one is a new incident
+      const now = Date.now();
+      let inc = incidents.get(src.name);
+      if (!inc) incidents.set(src.name, (inc = { since: now, lastAt: 0, sent: 0 }));
+      if ((state.emergencyAckAt ?? 0) >= inc.since || inc.sent >= EMERGENCY_MAX || now - inc.lastAt < EMERGENCY_REPEAT_MS) continue;
+      const what = em.map((p) => p.name || `Pen ${p.pen_id}`).join(", ");
+      if (state.muted) { console.log(`[emergency] muted, not sending: ${src.name} ${what}`); inc.lastAt = now; continue; }
+      const space = await resolveFarmerSpace();
+      if (!space) { console.error("[emergency] no farmer conversation yet"); continue; }
+      inc.lastAt = now;
+      inc.sent += 1;
+      await space.send(emergencyText(src, em)).catch((err) => console.error("[emergency] text failed:", err));
+      const audio = await speech(emergencySpeech(src, em));
+      if (audio) await space.send(voice(audio, { mimeType: "audio/mp4", name: "emergency.m4a" }))
+        .catch((err) => console.error("[emergency] voice note failed:", err));
+      console.log(`[emergency] sent ${src.name} ${what} (${inc.sent}/${EMERGENCY_MAX}${audio ? ", with voice note" : ""})`);
+    }
+  } finally {
+    emergencyBusy = false;
+  }
+}, 3000);
+
 const shutdown = async () => {
   for (const p of pollers) p.stop();
   clearInterval(escalation);
+  clearInterval(emergencyLoop);
   await app.stop();
   process.exit(0);
 };
