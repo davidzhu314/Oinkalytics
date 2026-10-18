@@ -155,7 +155,9 @@ const MIXED_SHARE = 1 / 3;
 // Every pen can hold pigs and hens. Server pen ids are "L1", "L2", … so this copy never shares pens
 // with the main hub on the chicken server; people only ever see the names.
 const KINDS = ["pig", "chicken"];
-const STORE_KEY = "oinkalytics-lab-pens-v1";
+const STORE_KEY = "oinkalytics-lab-pens-v3";
+// Unique per pen ever made, so a new pen can't inherit calls or alerts the servers still hold for an old id.
+const newPenId = (n) => `L${n}-${Math.random().toString(36).slice(2, 6)}`;
 const penNames = {}; // id -> name, kept for removed pens so old texts still read well
 const penCreated = {}; // id -> ISO time the pen was made; older alerts for a reused id aren't this pen's
 function loadPenList() {
@@ -163,7 +165,7 @@ function loadPenList() {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
     if (s?.pens?.length) return s;
   } catch { /* storage blocked or empty: start fresh */ }
-  return { next: 2, pens: [{ id: "L1", name: "Pen 1", mode: "mixed", animals: ["pig", "chicken"], created: new Date().toISOString() }] };
+  return { next: 2, pens: [{ id: newPenId(1), name: "Pen 1", mode: "mixed", animals: [], created: new Date().toISOString() }] };
 }
 let penList = loadPenList();
 function savePens() {
@@ -259,11 +261,20 @@ function addAnimal(pen, kind, walkIn) {
   n.g.addEventListener("pointerdown", (e) => { if (e.button === 0) { e.preventDefault(); animalSpeaks(pen, a); } });
   n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
   pen.animals.push(a);
+  updateHint(pen);
   for (const b of pen.addBtns) {
     b.disabled = pen.animals.length >= MAX_ANIMALS;
     b.dataset.n = pen.animals.filter((x) => x.kind === b.dataset.kind).length; // count badge
   }
   if (walkIn) { toast(`A new ${name} is walking into ${pen.name}.`); savePens(); }
+}
+
+/** Empty pens say how to start; once there are animals, how to hear one. */
+function updateHint(pen) {
+  if (!pen.hint) return;
+  const empty = !pen.animals.length;
+  pen.hint.textContent = empty ? "Empty pen · add a pig or hen below" : "Click an animal to hear it";
+  pen.card.classList.toggle("empty", empty);
 }
 
 /** A newcomer's mood follows the pen's mode. */
@@ -289,6 +300,7 @@ function applyMode(pen) {
 /** Click an animal: it makes a call of its own species and mood, out loud, and the pen's microphone hears it. */
 async function animalSpeaks(pen, a) {
   pen.card.classList.add("heard"); // the "click an animal" hint has done its job
+  pen.clicked = true;
   if (!playable(a.kind)) return toast(a.kind === "chicken" && !online.chicken ? "The chicken model isn't connected yet." : `No ${a.kind} calls to play.`);
   const clip = clipFor(pen, a.kind, a.mood);
   play(clip.url);
@@ -334,21 +346,23 @@ function buildPen(spec) {
   clips.append(fileIn);
   const title = el("input", { class: "pen-title", value: spec.name, "aria-label": "Pen name (click to rename)", maxlength: 40 });
   const remove = el("button", { class: "pen-remove", "aria-label": "Remove this pen", title: "Remove this pen", text: "✕" });
+  const hint = el("span", { class: "field-hint" });
   const card = el("article", { class: "pen calm" },
     el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, title, el("small", { text: who })),
       el("div", { class: "pen-head-right" }, badge, remove)),
-    el("div", { class: "field-wrap" }, svg, el("span", { class: "field-hint", text: "Click an animal to hear it" })),
+    el("div", { class: "field-wrap" }, svg, hint),
     el("div", { class: "pen-foot" },
       summary,
       el("div", { class: "pen-tools" },
         el("div", { class: "seg", role: "group", "aria-label": "What this pen's microphone hears" }, Object.values(modes)),
         el("div", { class: "tools" }, addBtns, clips, listen))));
 
-  const pen = { id, name: spec.name, kinds, card, svg, layer, animals, addBtns, badge, summary, modes, mineBtn,
+  const pen = { id, name: spec.name, kinds, card, svg, layer, animals, addBtns, hint, badge, summary, modes, mineBtn,
     mode: spec.mode || "mixed", mine: [], mineIdx: 0, listen: false, level: "idle", levels: {}, last: {}, order: {} };
   penNames[id] = pen.name;
   penCreated[id] = spec.created || new Date().toISOString();
-  for (const kind of spec.animals?.length ? spec.animals : herd(kinds)) addAnimal(pen, kind, false);
+  for (const kind of spec.animals ?? []) addAnimal(pen, kind, false);
+  updateHint(pen);
   for (const [m, b] of Object.entries(modes)) b.setAttribute("aria-pressed", m === pen.mode);
   applyMode(pen);
   const rename = () => {
@@ -377,7 +391,7 @@ function buildPen(spec) {
 
 function addPen() {
   const n = penList.next++;
-  const spec = { id: `L${n}`, name: `Pen ${n}`, mode: "mixed", animals: ["pig", "chicken"], created: new Date().toISOString() };
+  const spec = { id: newPenId(n), name: `Pen ${n}`, mode: "mixed", animals: [], created: new Date().toISOString() };
   $("#pens").insertBefore(buildPen(spec), $("#addPenCard"));
   savePens();
   toast(`${spec.name} added. Click its name to rename it.`);
@@ -555,7 +569,8 @@ async function pollPens() {
       const s = states[sp]?.[pen.id];
       if (!s) {
         pen.levels[sp] = "idle";
-        if (sp !== "pig") parts.push(el("span", {}, `${SPECIES[sp].emoji} waiting for the ${sp} model`));
+        // No state just means this pen hasn't made a call yet; only say "waiting" if the model is really offline.
+        if (!online[sp]) parts.push(el("span", {}, `${SPECIES[sp].emoji} waiting for the ${sp} model`));
         continue;
       }
       pen.levels[sp] = !s.window ? "idle" : s.level === "alert" && s.distressed >= CRITICAL_AT ? "critical" : s.level;
@@ -568,6 +583,8 @@ async function pollPens() {
     pen.badge.className = `badge ${level === "waiting" ? "idle" : level === "critical" ? "alert critical" : level}`;
     pen.badge.textContent = LEVEL[level];
     pen.card.className = `pen ${level === "waiting" ? "idle" : level === "critical" ? "alert critical" : level}`;
+    pen.card.classList.toggle("empty", !pen.animals.length); // keep the pen's own flags across refreshes
+    pen.card.classList.toggle("heard", !!pen.clicked);
     const shown = parts.length ? parts.flatMap((p, i) => (i ? [el("br"), p] : [p])) : ["No calls yet."];
     pen.summary.replaceChildren(...shown);
   }

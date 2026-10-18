@@ -312,3 +312,5 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
 }
 .add-pen-card .plus { font-size: 44px; line-height: 1; }
 .add-pen-card:hover { border-color: var(--ink); color: var(--ink); background: #fbf8f1; }
+
+.pen.empty .field-hint { opacity: 1; left: 50%; bottom: 50%; transform: translate(-50%, 50%); font-size: 14px; padding: 6px 12px; white-space: nowrap; }

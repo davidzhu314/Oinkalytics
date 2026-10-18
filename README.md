@@ -84,7 +84,7 @@ No model or data? `uvicorn api.mock_server:app --port 8000` serves the same API 
 HUB_WEB=web_lab .venv/bin/uvicorn api.server:app --port 8010   # http://localhost:8010
 ```
 
-Pens are saved in your browser. Its pen ids are `L1`, `L2`, … so it never mixes with the main hub's pens on the shared chicken server.
+Pens are saved in your browser. Its pen ids are unique (`L1-x7k2`, …), so it never mixes with the main hub's pens on the shared chicken server or inherits an old pen's calls.
 
 ## Data and credits
 
