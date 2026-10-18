@@ -328,7 +328,6 @@ function buildPen(spec) {
     return b;
   });
 
-  const who = kinds.map((k) => `${SPECIES[k].emoji} ${SPECIES[k].noun}s`).join(" + ");
   const badge = el("span", { class: "badge idle", text: "○ Quiet" });
   const summary = el("div", { class: "pen-summary", text: "No calls yet." });
   const mineBtn = el("button", { "aria-pressed": "false", title: "Your own recordings", text: "Mine" });
@@ -348,7 +347,7 @@ function buildPen(spec) {
   const remove = el("button", { class: "pen-remove", "aria-label": "Remove this pen", title: "Remove this pen", text: "✕" });
   const hint = el("span", { class: "field-hint" });
   const card = el("article", { class: "pen calm" },
-    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, title, el("small", { text: who })),
+    el("div", { class: "pen-head" }, el("div", { class: "pen-name" }, title),
       el("div", { class: "pen-head-right" }, badge, remove)),
     el("div", { class: "field-wrap" }, svg, hint),
     el("div", { class: "pen-foot" },
