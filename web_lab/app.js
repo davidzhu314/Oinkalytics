@@ -173,7 +173,7 @@ function loadPenList() {
 let penList = loadPenList();
 function savePens() {
   const list = [...pens.values()].map((p) => ({ id: p.id, name: p.name, mode: p.mode === "mine" ? "mixed" : p.mode,
-    animals: p.animals.map((a) => a.kind), created: penCreated[p.id] }));
+    animals: p.animals.map((a) => ({ kind: a.kind, mood: a.mood, voice: a.voice?.name })), created: penCreated[p.id] }));
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ next: penList.next, pens: list })); } catch { /* not saved */ }
 }
 const penLabel = (id) => pens.get(id)?.name || penNames[id] || `Pen ${id}`;
@@ -262,7 +262,20 @@ function herd(kinds) {
   return kinds.length > 1 ? ["pig", "chicken"] : [kinds[0], kinds[0]];
 }
 
-function addAnimal(pen, kind, walkIn) {
+/** Each animal has one voice: a held-out recording whose true label matches its mood. Clicking it
+ *  always plays that recording; a new mood gets a new matching voice. */
+function setMood(pen, a, mood, voiceName) {
+  const changed = a.mood !== mood;
+  a.mood = mood;
+  if (changed || !a.voice) {
+    const saved = voiceName && pools[a.kind]?.[mood]?.find((c) => c.name === voiceName);
+    a.voice = saved ? { name: saved.name, url: saved.url, species: a.kind } : playable(a.kind) ? clipFor(pen, a.kind, mood) : null;
+  }
+  const what = mood === "distressed" ? (a.kind === "pig" ? "stressed" : "sick") : "calm";
+  a.g.setAttribute("aria-label", `A ${what} ${a.kind === "pig" ? "pig" : "hen"} in ${pen.name}. Click to hear its call.`);
+}
+
+function addAnimal(pen, kind, walkIn, saved = null) {
   if (pen.animals.length >= MAX_ANIMALS) return toast(`${pen.name} is full (${MAX_ANIMALS} animals).`);
   const i = pen.animals.length;
   const n = kind === "pig" ? pigNode() : chickenNode();
@@ -270,11 +283,11 @@ function addAnimal(pen, kind, walkIn) {
   const x = 90 + (i % 3) * 110 + Math.random() * 20, y = 110 + (i % 2) * 50 + Math.random() * 10;
   // A new animal starts just outside the left edge of the field and walks in.
   const a = { ...n, x: walkIn ? -50 : x, y, tx: x, ty: y, rest: walkIn ? 0 : Math.random() * 2, dir: 1,
-    bob: Math.random() * 6, peck: Math.random() * 10, entering: walkIn, mood: moodFor(pen) };
+    bob: Math.random() * 6, peck: Math.random() * 10, entering: walkIn, mood: null, voice: null };
   const name = kind === "pig" ? "pig" : "hen";
   n.g.setAttribute("tabindex", "0");
   n.g.setAttribute("role", "button");
-  n.g.setAttribute("aria-label", `A ${name} in ${pen.name}. Click to hear it.`);
+  setMood(pen, a, saved?.mood || moodFor(pen), saved?.voice);
   // React on press, not "click": a click is dropped if the node moves in the DOM between press and release.
   n.g.addEventListener("pointerdown", (e) => { if (e.button === 0) { e.preventDefault(); animalSpeaks(pen, a); } });
   n.g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); animalSpeaks(pen, a); } });
@@ -341,7 +354,7 @@ function moodFor(pen) {
 function applyMode(pen) {
   if (pen.mode === "mine") return;
   if (pen.mode !== "mixed") {
-    for (const a of pen.animals) a.mood = pen.mode;
+    for (const a of pen.animals) setMood(pen, a, pen.mode);
     return;
   }
   const n = pen.animals.length;
@@ -349,7 +362,7 @@ function applyMode(pen) {
   const x = n * MIXED_SHARE, k0 = Math.floor(x) + (Math.random() < x - Math.floor(x) ? 1 : 0);
   const k = n >= 2 ? Math.max(1, k0) : k0;
   const order = [...pen.animals].sort(() => Math.random() - 0.5);
-  order.forEach((a, i) => { a.mood = i < k ? "distressed" : "calm"; });
+  order.forEach((a, i) => setMood(pen, a, i < k ? "distressed" : "calm"));
 }
 
 /** Click an animal: it makes a call of its own species and mood, out loud, and the pen's microphone hears it. */
@@ -357,7 +370,8 @@ async function animalSpeaks(pen, a) {
   pen.card.classList.add("heard"); // the "click an animal" hint has done its job
   pen.clicked = true;
   if (!playable(a.kind)) return toast(a.kind === "chicken" && !online.chicken ? "The chicken model isn't connected yet." : `No ${a.kind} calls to play.`);
-  const clip = clipFor(pen, a.kind, a.mood);
+  if (!a.voice) setMood(pen, a, a.mood); // its model just came online
+  const clip = a.voice;
   play(clip.url);
   try {
     pen.heard = true;
@@ -425,10 +439,11 @@ function buildPen(spec) {
     mode: spec.mode || "mixed", mine: [], mineIdx: 0, listen: false, level: "idle", levels: {}, last: {}, order: {} };
   penNames[id] = pen.name;
   penCreated[id] = spec.created || new Date().toISOString();
-  for (const kind of spec.animals ?? []) addAnimal(pen, kind, false);
+  const saved = (spec.animals ?? []).map((x) => (typeof x === "string" ? { kind: x } : x));
+  for (const x of saved) addAnimal(pen, x.kind, false, x);
   updateHint(pen);
   for (const [m, b] of Object.entries(modes)) b.setAttribute("aria-pressed", m === pen.mode);
-  applyMode(pen);
+  if (saved.some((x) => !x.mood)) applyMode(pen); // older saves had no moods
   const rename = () => {
     const v = title.value.trim() || pen.name;
     title.value = v;
