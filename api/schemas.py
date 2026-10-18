@@ -71,6 +71,7 @@ class PenStatus(BaseModel):
     last_prediction_id: Optional[str] = None
     updated_at: Optional[datetime] = None
     summary: str = Field(description="One line, ready to text: 'Pen 3: ALERT, 4 of last 5 distressed'")
+    name: Optional[str] = Field(None, description="Display name set with POST /pens/{pen_id}/name (e.g. 'North barn')")
 
 
 class Alert(BaseModel):
@@ -78,6 +79,7 @@ class Alert(BaseModel):
     pen_id: str
     created_at: datetime
     message: str = Field(description="Ready to send as-is")
+    pen_name: Optional[str] = Field(None, description="The pen's display name, if one was set")
     distressed: int
     window: int
     confidence: float = Field(description="Mean p_distressed of the flagged calls")

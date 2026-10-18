@@ -10,6 +10,8 @@ export type PenStatus = {
   last_prediction_id: string | null;
   updated_at: string | null;
   summary: string;
+  /** Display name set by the hub ("North barn"); absent for numbered pens. */
+  name?: string | null;
 };
 
 export type Alert = {
@@ -17,6 +19,7 @@ export type Alert = {
   pen_id: string;
   created_at: string;
   message: string;
+  pen_name?: string | null;
   distressed: number;
   window: number;
   confidence: number;

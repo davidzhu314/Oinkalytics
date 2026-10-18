@@ -115,7 +115,7 @@ def install(app: FastAPI) -> None:
 
     @app.api_route("/hub-api/chicken/{path:path}", methods=["GET", "POST"], include_in_schema=False)
     async def chicken(path: str, request: Request):
-        pen_reset = path.startswith("pens/") and path.endswith("/reset") and path.count("/") == 2
+        pen_reset = path.startswith("pens/") and path.count("/") == 2 and path.rsplit("/", 1)[1] in ("reset", "name", "remove")
         if path not in CHICKEN_PATHS and not path.startswith("audio/") and not pen_reset:
             raise HTTPException(404, "unknown chicken endpoint")
         async with httpx.AsyncClient(base_url=CHICKEN_API, timeout=30) as c:

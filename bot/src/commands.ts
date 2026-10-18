@@ -42,15 +42,19 @@ function callCount(n: number, of: number, bad: string, now = false): string {
   return n === of ? `The last ${of} calls from the pen all ${verb}` : `${n} of the last ${of} calls from the pen ${verb}`;
 }
 
+/** "North barn" when the hub named the pen, else "Pen 3". */
+export const penTitle = (id: string, name?: string | null): string => name || `Pen ${id}`;
+const sureText = (confidence: number): string => (confidence >= 0.995 ? ">99%" : `${Math.round(confidence * 100)}%`);
+
 export function alertText(src: Source, a: Alert): string {
   const bad = src.bad ?? "stressed";
   const noun = src.noun ?? "animal";
-  const head = src.emoji ? `${src.emoji} Pen ${a.pen_id}` : `Pen ${a.pen_id}`;
-  const sure = Math.round(a.confidence * 100);
+  const head = src.emoji ? `${src.emoji} ${penTitle(a.pen_id, a.pen_name)}` : penTitle(a.pen_id, a.pen_name);
+  const sure = sureText(a.confidence);
   const reason = reasonOf(a.explanation.text);
   const sev = severity(a.distressed);
   return [
-    `${TAG[sev]} · ${head} sounds ${bad} (${sure}% sure). ${callCount(a.distressed, a.window, bad)}, could be one ${noun} or several.` +
+    `${TAG[sev]} · ${head} sounds ${bad} (${sure} sure). ${callCount(a.distressed, a.window, bad)}, could be one ${noun} or several.` +
       (sev === "critical" ? " Please check the pen now." : ""),
     reason,
     'Reply "play it" to hear the call.',
@@ -123,14 +127,16 @@ export async function handle(text: string, sources: Source[], state: BotState): 
   const cmd = parse(text);
   const say = (t: string): Reply[] => [{ kind: "text", text: t }];
   const many = sources.length > 1;
-  const label = (src: Source, pen: string) => (src.emoji ? `${src.emoji} Pen ${pen}` : many ? `${src.name}, Pen ${pen}` : `Pen ${pen}`);
+  const label = (src: Source, pen: string, name?: string | null) =>
+    src.emoji ? `${src.emoji} ${penTitle(pen, name)}` : many ? `${src.name}, ${penTitle(pen, name)}` : penTitle(pen, name);
   try {
     switch (cmd) {
       case "status": {
         const blocks: string[] = [];
         for (const src of pick(text, sources)) {
           try {
-            const pens = await src.oink.pens();
+            // Named pens (the hub's) and pens with calls; skip unnamed defaults nobody is using.
+            const pens = (await src.oink.pens()).filter((p) => p.name || p.window > 0);
             const lines = pens.length ? pens.map((p) => p.summary).join("\n") : "No pens are set up yet.";
             blocks.push(many ? `${src.name}:\n${lines}` : lines);
           } catch (err) {
@@ -145,7 +151,7 @@ export async function handle(text: string, sources: Source[], state: BotState): 
         const { hit, down } = await latest(chosen, sources[0], penOf(text));
         if (!hit && down.length === chosen.length) return say(`${down.map((s) => s.name).join(", ")}: monitor not connected.`);
         if (!hit) return say(penOf(text) ? `No alerts from Pen ${penOf(text)} yet.` : "No alerts yet. Every pen has been calm so far.");
-        return say(`${label(hit.src, hit.alert.pen_id)}: ${hit.alert.explanation.text}`);
+        return say(`${label(hit.src, hit.alert.pen_id, hit.alert.pen_name)}: ${hit.alert.explanation.text}`);
       }
       case "play": {
         const chosen = pick(text, sources);
@@ -155,7 +161,7 @@ export async function handle(text: string, sources: Source[], state: BotState): 
         const bytes = await hit.src.oink.audio(hit.alert.audio_url);
         const who = many ? `${hit.src.name.toLowerCase()}-` : "";
         return [
-          { kind: "text", text: `This is the call that triggered the ${label(hit.src, hit.alert.pen_id)} alert.` },
+          { kind: "text", text: `This is the call that triggered the ${label(hit.src, hit.alert.pen_id, hit.alert.pen_name)} alert.` },
           { kind: "audio", bytes, name: `${who}pen-${hit.alert.pen_id}-call.wav` },
         ];
       }
@@ -179,7 +185,7 @@ export async function handle(text: string, sources: Source[], state: BotState): 
 /** Follow-up when a pen that already got a warning gets worse (the server only alerts once per pen per 5 min). */
 export function escalationText(src: Source, pen: PenStatus): string {
   const bad = src.bad ?? "stressed";
-  const head = src.emoji ? `${src.emoji} Pen ${pen.pen_id}` : `Pen ${pen.pen_id}`;
+  const head = src.emoji ? `${src.emoji} ${penTitle(pen.pen_id, pen.name)}` : penTitle(pen.pen_id, pen.name);
   return `${TAG.critical} · ${head}: it's getting worse. ${callCount(pen.distressed, pen.window, bad, true)}. ` +
     `Please check the pen now.\nReply "play it" to hear the call.`;
 }

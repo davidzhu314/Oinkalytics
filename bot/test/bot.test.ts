@@ -235,9 +235,19 @@ test("one alert message: verdict, how sure, the reason, one hint", () => {
     'Reply "play it" to hear the call.');
   // a one-sentence explanation has no extra reason: two lines, no repeat of the verdict
   const short = { ...alert("c1", "2"), confidence: 1, explanation: { text: "This recording sounds unhealthy (100% confident).", source: "template" as const } };
-  assert.equal(alertText(hen, short), "⚠️ Warning · 🐔 Pen 2 sounds sick (100% sure). 3 of the last 5 calls from the pen sounded sick, could be one hen or several.\n" +
+  assert.equal(alertText(hen, short), "⚠️ Warning · 🐔 Pen 2 sounds sick (>99% sure). 3 of the last 5 calls from the pen sounded sick, could be one hen or several.\n" +
     'Reply "play it" to hear the call.');
   assert.doesNotMatch(alertText(pig, withReason), /why pig|play pig|Reply "why"/);
+});
+
+test("alerts and escalations use the pen's name when the hub set one", () => {
+  const pig: Source = { name: "Pigs", emoji: "🐷", bad: "stressed", noun: "pig", match: /pig/, oink: fakeOink() };
+  const named = { ...alert("n1", "L1-x7k2"), pen_name: "North barn", confidence: 0.82 };
+  assert.match(alertText(pig, named), /^⚠️ Warning · 🐷 North barn sounds stressed \(82% sure\)/);
+  assert.match(alertText(pig, { ...named, pen_name: null }), /🐷 Pen L1-x7k2 sounds/);
+  const status = { pen_id: "L1-x7k2", name: "North barn", level: "alert" as const, window: 5, distressed: 4,
+    last_prediction_id: null, updated_at: null, summary: "" };
+  assert.match(escalationText(pig, status), /🐷 North barn: it's getting worse/);
 });
 
 test("replies tag the pen with its animal", async () => {

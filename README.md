@@ -84,7 +84,7 @@ No model or data? `uvicorn api.mock_server:app --port 8000` serves the same API 
 HUB_WEB=web_lab .venv/bin/uvicorn api.server:app --port 8010   # http://localhost:8010
 ```
 
-Pens are saved in your browser. Its pen ids are unique (`L1-x7k2`, …), so it never mixes with the main hub's pens on the shared chicken server or inherits an old pen's calls.
+Pens are saved in your browser, and their names are sent to the servers, so the iMessage bot's texts say "North barn" instead of an id. To have the bot text from the pen builder instead of the main hub, start it with `OINK_API=http://localhost:8010 CHICKEN_API=http://localhost:8002 npm run dev` (start the 8010 server with `PENS=""` so "status" lists only your pens). Only one bot can run on the Photon line. Its pen ids are unique (`L1-x7k2`, …), so it never mixes with the main hub's pens on the shared chicken server or inherits an old pen's calls.
 
 ## Data and credits
 

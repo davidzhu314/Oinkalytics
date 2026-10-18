@@ -61,7 +61,9 @@ async function health() {
     const r = await api("/health");
     h.textContent = r.mode === "real" ? "● Live model" : "● Mock model";
     h.className = "health ok";
+    const was = online.chicken;
     try { await api("/hub-api/chicken/health"); online.chicken = true; } catch { online.chicken = false; }
+    if (online.chicken && !was) for (const p of pens.values()) syncPen(p); // chicken model (re)connected
     if (Object.values(layout).some((k) => k.includes("chicken"))) h.textContent += online.chicken ? " · 🐔 connected" : " · 🐔 not connected";
   } catch {
     h.textContent = "● API offline";
@@ -174,6 +176,21 @@ function savePens() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ next: penList.next, pens: list })); } catch { /* not saved */ }
 }
 const penLabel = (id) => pens.get(id)?.name || penNames[id] || `Pen ${id}`;
+
+/** Tell every model server about a pen's name, so the iMessage bot's texts and "status" use it. */
+function syncPen(pen) {
+  const body = JSON.stringify({ name: pen.name });
+  for (const sp of Object.keys(SPECIES)) {
+    if (!online[sp]) continue;
+    api(`${SPECIES[sp].base}/pens/${pen.id}/name`, { method: "POST", headers: { "Content-Type": "application/json" }, body })
+      .catch(() => {});
+  }
+}
+function unsyncPen(pen) {
+  for (const sp of Object.keys(SPECIES)) {
+    if (online[sp]) api(`${SPECIES[sp].base}/pens/${pen.id}/remove`, { method: "POST" }).catch(() => {});
+  }
+}
 const W = 400, H = 230;
 const pens = new Map();
 let layout = { 1: ["pig"], 2: ["pig", "chicken"], 3: ["chicken"], 4: ["pig", "chicken"] };
@@ -367,7 +384,7 @@ function buildPen(spec) {
   const rename = () => {
     const v = title.value.trim() || pen.name;
     title.value = v;
-    if (v !== pen.name) { pen.name = penNames[id] = v; savePens(); toast(`Renamed to ${v}.`); }
+    if (v !== pen.name) { pen.name = penNames[id] = v; savePens(); syncPen(pen); toast(`Renamed to ${v}.`); }
   };
   title.addEventListener("change", rename);
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); if (e.key === "Escape") { title.value = pen.name; title.blur(); } });
@@ -392,6 +409,7 @@ function addPen() {
   const n = penList.next++;
   const spec = { id: newPenId(n), name: `Pen ${n}`, mode: "mixed", animals: [], created: new Date().toISOString() };
   $("#pens").insertBefore(buildPen(spec), $("#addPenCard"));
+  syncPen(pens.get(spec.id));
   savePens();
   toast(`${spec.name} added. Click its name to rename it.`);
   pens.get(spec.id).card.querySelector(".pen-title").focus();
@@ -400,7 +418,7 @@ function addPen() {
 function removePen(pen) {
   if (pens.size === 1) return toast("Keep at least one pen.");
   if (!confirm(`Remove ${pen.name}? Its animals and recent calls go with it.`)) return;
-  resetPen(pen); // the servers forget its calls, so it can't keep alerting
+  unsyncPen(pen); // the servers stop tracking it, so it can't keep alerting
   pens.delete(pen.id);
   pen.card.remove();
   savePens();
@@ -734,6 +752,7 @@ async function boot() {
     el("span", { class: "plus", text: "＋" }), el("span", { text: "Add a pen" }));
   $("#pens").replaceChildren(...penList.pens.map(buildPen), addCard);
   $("#addPen").onclick = addPen;
+  for (const pen of pens.values()) syncPen(pen); // names may be new to a restarted server
   requestAnimationFrame(animate);
 
   $("#barnToggle").onclick = () => setRunning(!running);

@@ -4,6 +4,7 @@ from typing import Callable, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from .schemas import Alert, Health, PenStatus, Prediction
 from .state import Store
@@ -54,6 +55,21 @@ def build_router(store: Store, predict_fn: Callable[..., Prediction], health: He
             raise HTTPException(404, f"unknown pen {pen_id}")
         store.reset_pen(pen_id)
         return store.pen_status(pen_id)
+
+    class PenName(BaseModel):
+        name: str = Field(min_length=1, max_length=60)
+
+    @r.post("/pens/{pen_id}/name", response_model=PenStatus)
+    def name_pen(pen_id: str, body: PenName):
+        """Give a pen a display name; alerts and status then use it ("North barn" instead of "Pen L1-x7k2")."""
+        store.set_name(pen_id, body.name.strip())
+        return store.pen_status(pen_id)
+
+    @r.post("/pens/{pen_id}/remove")
+    def remove_pen(pen_id: str):
+        """Stop tracking a pen the user deleted (alerts already sent stay listed)."""
+        store.remove_pen(pen_id)
+        return {"ok": True}
 
     @r.get("/alerts", response_model=list[Alert])
     def alerts(after: Optional[str] = Query(None, description="Return only alerts newer than this alert_id")):

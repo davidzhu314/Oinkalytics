@@ -2,6 +2,14 @@
 
 A running log of choices we make during the build. Newest first.
 
+## Hour 24: pen builder wired to the iMessage bot (pen names; additive API)
+
+- **New, additive:** `POST /pens/{pen_id}/name` (`{"name": "North barn"}`) and `POST /pens/{pen_id}/remove`. `PenStatus.name` and `Alert.pen_name` are new optional fields; alert messages and status summaries use the name when set. Names survive `/reset`. Nothing existing changed; the chicken server inherits it (restarted at ~22:50 to pick it up).
+- **Hub chicken proxy** forwards `pens/{id}/name` and `pens/{id}/remove` too.
+- **Pen builder (`web_lab/`, port 8010)** sends each pen's name on create, rename and page load, and removes deleted pens from both servers. Run its server with `PENS=""` so the bot's "status" lists only the user's pens.
+- **Bot:** alerts, "why", "play it" and escalations say the pen's name ("🐷 North barn sounds stressed"); "status" skips unnamed pens with no calls; confidence shows ">99%" instead of "100%". 19/19 tests pass.
+- **The live bot now watches the pen builder:** `OINK_API=http://localhost:8010 CHICKEN_API=http://localhost:8002`. Verified ~22:55: a "Photon test pen" set to Stressed alerted after a few calls, and the bot logged `[alerts] sent`. To go back to the main hub, restart the bot without the `OINK_API` override.
+
 ## Hour 21–22: Egyptian fruit bats; aggression doesn't hold up, a time-of-day confound (ml/bat_prep.py, ml/bat_eval.py)
 
 **Data.** Prat, Taub, Pratt & Yovel 2017 (*Scientific Data*), Figshare collection 10.6084/m9.figshare.c.3666502, **CC0**. Archives files220 + files222 with Annotations.csv + FileInfo.csv: **5,536 annotated calls** with a known caller, **10 juvenile bats** (born in the lab, ~7–9 months old), groups of five in two colony chambers (treatments 16–19), **28 days**, Tel Aviv University lab colony (**not a zoo**). Each annotated segment cut from its 250 kHz recording and resampled to 32 kHz for Perch (keeps < 16 kHz). Unknown, isolation, separation and landing contexts dropped.

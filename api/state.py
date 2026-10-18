@@ -25,7 +25,24 @@ def now() -> datetime:
 class Store:
     def __init__(self):
         self._lock = threading.Lock()
+        self.names: dict[str, str] = {}  # pen_id -> display name; survives /reset (names aren't calls)
         self.reset()
+
+    def label(self, pen_id: str) -> str:
+        return self.names.get(pen_id) or f"Pen {pen_id}"
+
+    def set_name(self, pen_id: str, name: str) -> None:
+        """Name a pen (and list it in /pens even before its first call)."""
+        with self._lock:
+            self.names[pen_id] = name
+            self.history.setdefault(pen_id, deque(maxlen=WINDOW))
+
+    def remove_pen(self, pen_id: str) -> None:
+        """Stop tracking a pen: it leaves /pens and can't alert. Alerts already sent stay listed."""
+        with self._lock:
+            self.history.pop(pen_id, None)
+            self.last_alert_at.pop(pen_id, None)
+            self.names.pop(pen_id, None)
 
     def reset(self):
         with self._lock:
@@ -68,8 +85,9 @@ class Store:
                 alert_id=new_id("alrt"),
                 pen_id=pred.pen_id,
                 created_at=pred.created_at,
+                pen_name=self.names.get(pred.pen_id),
                 message=(
-                    f"Pen {pred.pen_id}: distress calls rising, {len(flagged)} of the last "
+                    f"{self.label(pred.pen_id)}: distress calls rising, {len(flagged)} of the last "
                     f"{len(hist)} flagged ({conf:.0%} confidence)."
                 ),
                 distressed=len(flagged),
@@ -89,8 +107,8 @@ class Store:
         level = "alert" if n_bad >= THRESHOLD else "watch" if n_bad else "calm"
         last = hist[-1] if hist else None
         summary = (
-            f"Pen {pen_id}: {level.upper()}, {n_bad} of last {len(hist)} distressed"
-            if hist else f"Pen {pen_id}: no calls yet"
+            f"{self.label(pen_id)}: {level.upper()}, {n_bad} of last {len(hist)} distressed"
+            if hist else f"{self.label(pen_id)}: no calls yet"
         )
         return PenStatus(
             pen_id=pen_id,
@@ -100,6 +118,7 @@ class Store:
             last_prediction_id=last.prediction_id if last else None,
             updated_at=last.created_at if last else None,
             summary=summary,
+            name=self.names.get(pen_id),
         )
 
     def pens(self) -> list[PenStatus]:
